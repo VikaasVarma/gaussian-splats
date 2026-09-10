@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rasterizer</title>
+    <style>
+      html, body { height: 100%; margin: 0; background: #111; }
+      body { display: grid; place-items: center; }
+      img { max-width: 100%; max-height: 100%; image-rendering: pixelated; }
+    </style>
+  </head>
+  <body>
+    <img id="viewer" alt="Rasterizer output" />
+    <script>
+      const viewer = document.querySelector("#viewer");
+      const refresh = () => {
+        viewer.src = `/frame.jpg?t=${Date.now()}`;
+      };
+      viewer.addEventListener("load", () => setTimeout(refresh, 100));
+      viewer.addEventListener("error", () => setTimeout(refresh, 1000));
+      refresh();
+    </script>
+  </body>
+</html>

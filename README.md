@@ -19,6 +19,14 @@ Run the linter:
 uv run ruff check .
 ```
 
+Start the placeholder rasterizer viewer:
+
+```bash
+uv run visualize
+```
+
+Open `http://127.0.0.1:7007`. On a remote machine, forward that port over SSH.
+
 ## Layout
 
 ```text

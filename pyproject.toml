@@ -10,6 +10,9 @@ dependencies = [
     "torch>=2.4",
 ]
 
+[project.scripts]
+visualize = "gaussian_splats.visualize.server:main"
+
 [dependency-groups]
 dev = [
     "ruff>=0.6",
