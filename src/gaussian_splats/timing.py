@@ -25,9 +25,7 @@ def record_timings(device: torch.device) -> Iterator[dict[str, dict[str, float]]
         _timers.reset(token)
 
 
-def timed(
-    title: str | Callable[..., Any] | None = None, *, tag: str = "default"
-) -> Any:
+def timed(title: str | Callable[..., Any] | None = None, *, tag: str = "default") -> Any:
     if callable(title):
         return _decorate(title, title.__name__.replace("_", " ").title(), tag)
     if title is None:

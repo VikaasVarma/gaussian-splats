@@ -114,6 +114,7 @@ def evaluate_sh(coefficients: torch.Tensor, directions: torch.Tensor) -> torch.T
     return (torch.einsum("nck,nk->nc", coefficients, basis) + 0.5).clamp(0, 1)
 
 
+@torch.compile(fullgraph=True, dynamic=True)
 def mahalanobis_distance_squared(
     offset: torch.Tensor,  # M x (tile_size * tile_size) x 2
     inverse_covariance: torch.Tensor,  # M x 2 x 2
@@ -125,6 +126,7 @@ def mahalanobis_distance_squared(
     return xx * x.square() + 2 * xy * x * y + yy * y.square()
 
 
+@torch.compile(fullgraph=True, dynamic=True)
 def probability(
     distance_squared: torch.Tensor,
     rendering_mode: str = "gaussian",

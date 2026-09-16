@@ -63,7 +63,7 @@ def cull(
 def tile(
     splats: ProjectedGaussianSplat,
     camera: Camera,
-    tile_size: int = 16,
+    tile_size: int = 8,
     rendering_mode: str = "gaussian",
     confidence: float = 0.95,
 ) -> tuple[
@@ -139,7 +139,7 @@ def render(
     splats: ProjectedGaussianSplat,
     camera: Camera,
     assignment: tuple[torch.Tensor, torch.Tensor],
-    tile_size: int = 16,
+    tile_size: int = 8,
     opacity_threshold: float = 0.999,
     rendering_mode: Literal["gaussian", "ellipsoid"] = "gaussian",
     confidence: float = 0.95,
@@ -156,14 +156,13 @@ def render(
     with timed("Pixel grid"):
         # Get pixel grid for tiles with Gaussians
         tile_pixels, tile_origins = create_pixel_grids_and_origins(tile_size, Ht, Wt, device, dtype)
-        pixels = tile_origins[tile_ids, None] + tile_pixels  # M x (T * T) x 2
 
     with timed("Visible Probability"):
         # Compute the probability of each gaussian being visible at each pixel
-        offset = pixels - splats.mean[indices, None, :2]
+        offset = tile_origins[tile_ids, None] + tile_pixels - splats.mean[indices, None, :2]
         distance = mahalanobis_distance_squared(offset, splats.inverse_covariance[indices])
         p = probability(distance, rendering_mode, confidence)
-        alpha = (splats.opacity[indices] * p).clamp_max(0.99)  # M x (T * T)
+        alpha = (splats.opacity[indices] * p).clamp_max(0.99)
 
     with timed("Blend"):
         # Get transmittance of each gaussian (at each tile)
@@ -190,7 +189,7 @@ def rasterize(
     splats: GaussianSplat,
     camera: Camera,
     #
-    tile_size: int = 16,
+    tile_size: int = 8,
     opacity_threshold: float = 0.999,
     near: float = 0.1,
     far: float = 100.0,

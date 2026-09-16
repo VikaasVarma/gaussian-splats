@@ -6,6 +6,7 @@ from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 
+import torch
 import typer
 import uvicorn
 from PIL import Image
@@ -37,6 +38,7 @@ def render_frame(
 
 
 def frame(request: Request) -> Response:
+    splats = request.app.state.splats
     camera = request.app.state.camera
     params = request.query_params
 
@@ -49,7 +51,7 @@ def frame(request: Request) -> Response:
     )
 
     options = {
-        "tile_size": int(params.get("tile_size", 16)),
+        "tile_size": int(params.get("tile_size", 8)),
         "opacity_threshold": float(params.get("opacity_threshold", 0.999)),
         "near": float(params.get("near", 0.1)),
         "far": float(params.get("far", 100)),
@@ -58,7 +60,7 @@ def frame(request: Request) -> Response:
         "confidence": float(params.get("confidence", 0.95)),
     }
 
-    image, timings = render_frame(request.app.state.splats, camera, **options)
+    image, timings = render_frame(splats, camera, **options)
     return Response(
         image,
         media_type="image/jpeg",
@@ -81,11 +83,18 @@ async def control(request: Request) -> Response:
 
 
 def create_app() -> Starlette:
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
     splats = (
         GaussianSplat.from_checkpoint(os.getenv(CHECKPOINT))
         if os.getenv(CHECKPOINT) is not None
         else GaussianSplat(1_000_000)
-    )
+    ).to(device)
     camera = PinholeCamera().fit_to_points(splats.mean)
 
     app = Starlette(
