@@ -27,6 +27,7 @@ dist/
 *.key
 
 # Research outputs and large artifacts
+output/
 assets/
 artifacts/
 checkpoints/

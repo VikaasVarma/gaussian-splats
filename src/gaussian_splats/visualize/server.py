@@ -29,8 +29,9 @@ CHECKPOINT = "GAUSSIAN_SPLATS_CHECKPOINT"
 def render_frame(
     splats: GaussianSplat, camera: PinholeCamera, **options: int | float | str
 ) -> tuple[bytes, dict[str, dict[str, float]]]:
-    with record_timings(splats.mean.device) as times:
+    with torch.no_grad(), record_timings(splats.mean.device) as times:
         image = rasterize(splats, camera, **options)
+        image = (255 * image.clamp(0, 1)).byte().cpu().numpy()
 
     output = BytesIO()
     Image.fromarray(image, "RGB").save(output, "JPEG", quality=75)

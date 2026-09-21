@@ -62,12 +62,14 @@ def evaluate_sh(coefficients: torch.Tensor, directions: torch.Tensor) -> torch.T
     x, y, z = directions.unbind(dim=-1)
     xx, yy, zz = x.square(), y.square(), z.square()
     xy, yz, xz = x * y, y * z, x * z
-    basis = directions.new_empty((len(directions), coefficients.shape[-1]))
+
+    degree = coefficients.shape[1]
+    basis = directions.new_empty((len(directions), degree))
     basis[:, 0] = SH_C0
 
-    if coefficients.shape[-1] > 1:
+    if degree > 1:
         basis[:, 1:4] = torch.stack((-SH_C1 * y, SH_C1 * z, -SH_C1 * x), dim=-1)
-    if coefficients.shape[-1] > 4:
+    if degree > 4:
         basis[:, 4:9] = torch.stack(
             (
                 SH_C2[0] * xy,
@@ -78,7 +80,7 @@ def evaluate_sh(coefficients: torch.Tensor, directions: torch.Tensor) -> torch.T
             ),
             dim=-1,
         )
-    if coefficients.shape[-1] > 9:
+    if degree > 9:
         basis[:, 9:16] = torch.stack(
             (
                 SH_C3[0] * y * (3 * xx - yy),
@@ -91,7 +93,7 @@ def evaluate_sh(coefficients: torch.Tensor, directions: torch.Tensor) -> torch.T
             ),
             dim=-1,
         )
-    if coefficients.shape[-1] > 16:
+    if degree > 16:
         basis[:, 16:25] = torch.stack(
             (
                 SH_C4[0] * xy * (xx - yy),
@@ -106,12 +108,10 @@ def evaluate_sh(coefficients: torch.Tensor, directions: torch.Tensor) -> torch.T
             ),
             dim=-1,
         )
-    if coefficients.shape[-1] > 25:
-        raise NotImplementedError(
-            f"SH degree {int(coefficients.shape[-1] ** 0.5) - 1} > 4 is not implemented"
-        )
+    if degree > 25:
+        raise NotImplementedError(f"SH degree {int(degree**0.5) - 1} > 4 is not implemented")
 
-    return (torch.einsum("nck,nk->nc", coefficients, basis) + 0.5).clamp(0, 1)
+    return ((basis.unsqueeze(1) @ coefficients).squeeze(1) + 0.5).clamp_min(0)
 
 
 @torch.compile(fullgraph=True, dynamic=True)

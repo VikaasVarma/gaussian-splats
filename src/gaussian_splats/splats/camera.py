@@ -53,13 +53,12 @@ class PinholeCamera(Camera):
 
     focal_length: tuple[float, float] = (500.0, 500.0)
     principal_point: tuple[float, float] = (320.0, 240.0)
+    intrinsics: torch.Tensor = field(init=False, repr=False)
 
-    @property
-    def intrinsics(self) -> torch.Tensor:
-        """Camera intrinsics matrix"""
+    def __post_init__(self) -> None:
         fx, fy = self.focal_length
         cx, cy = self.principal_point
-        return torch.tensor(
+        self.intrinsics = torch.tensor(
             [
                 [fx, 0, cx],
                 [0, fy, cy],
@@ -68,6 +67,11 @@ class PinholeCamera(Camera):
             dtype=self.dtype,
             device=self.device,
         )
+
+    def to(self, device: torch.device | str) -> Self:
+        super().to(device)
+        self.intrinsics = self.intrinsics.to(device)
+        return self
 
     def project_gaussian(
         self,
@@ -83,22 +87,26 @@ class PinholeCamera(Camera):
         # Transform gaussian means to pixel space
         mean = mean @ camera_rotation.T + self.translation
         x, y, z = mean.unbind(dim=-1)
+        z = torch.where(z.abs() >= 1e-4, z, torch.sign(z) * 1e-4)
         fx, fy = self.focal_length
+        width, height = self.image_size
 
         mean = mean @ self.intrinsics.T
         mean = mean[:, :2] / mean[:, 2:]
         mean = torch.cat((mean, z[:, None]), dim=-1)
 
         # Linearize the perspective projection around each Gaussian mean.
+        tan_half_fov_x = width / (2 * fx)
+        tan_half_fov_y = height / (2 * fy)
         zero = torch.zeros_like(z)
         jacobian = torch.stack(
             (
                 fx / z,
                 zero,
-                -fx * x / z.square(),
+                -fx * (x / z).clamp(-1.3 * tan_half_fov_x, 1.3 * tan_half_fov_x) / z,
                 zero,
                 fy / z,
-                -fy * y / z.square(),
+                -fy * (y / z).clamp(-1.3 * tan_half_fov_y, 1.3 * tan_half_fov_y) / z,
             ),
             dim=-1,
         ).view(-1, 2, 3)

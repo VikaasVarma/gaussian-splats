@@ -6,19 +6,27 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "einops>=0.8",
+    "matplotlib>=3.9",
     "numpy>=2.0",
     "pillow>=10.4",
+    "seaborn>=0.13",
     "starlette>=0.47",
     "torch>=2.4",
+    "tqdm>=4.66",
+    "triton>=3.4 ; sys_platform == 'linux'",
+    "triton @ git+https://github.com/triton-lang/triton.git@570e5b4dd1e2d1daf785a894d19268fe7b281cb5 ; sys_platform == 'darwin'",
     "typer>=0.16",
     "uvicorn>=0.35",
 ]
 
 [project.scripts]
+gaussian-benchmark = "gaussian_splats.kernels.rasterize.benchmark:main"
 visualize = "gaussian_splats.visualize.server:main"
 
 [dependency-groups]
 dev = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.6",
     "ruff>=0.6",
 ]
 
@@ -26,9 +34,15 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["src/gaussian_splats/kernels/rasterize/tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
