@@ -7,6 +7,7 @@ import math
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 import torch
 import typer
@@ -215,17 +216,22 @@ def run(
 
 @app.command()
 def benchmark(
-    checkpoint: str | None = typer.Option(None, help="Scene checkpoint path."),
-    output: str = typer.Option("output/rasterize-benchmark", help="Output directory."),
-    device: str | None = typer.Option(None, help="Torch device; defaults to CUDA when available."),
-    width: int = typer.Option(640, min=8),
-    height: int = typer.Option(480, min=8),
-    num_splats: int | None = typer.Option(None, min=1),
-    frames: int = typer.Option(
-        120, "--trajectory-frames", "--frames", min=2, help="Number of camera trajectory frames."
-    ),
-    repeats: int = typer.Option(3, min=1),
-    seed: int = typer.Option(42),
+    checkpoint: Annotated[str | None, typer.Option(help="Scene checkpoint path.")] = None,
+    output: Annotated[str, typer.Option(help="Output directory.")] = "output/rasterize-benchmark",
+    device: Annotated[
+        str | None, typer.Option(help="Torch device; defaults to CUDA when available.")
+    ] = None,
+    width: Annotated[int, typer.Option(min=8)] = 640,
+    height: Annotated[int, typer.Option(min=8)] = 480,
+    num_splats: Annotated[int | None, typer.Option(min=1)] = None,
+    frames: Annotated[
+        int,
+        typer.Option(
+            "--trajectory-frames", "--frames", min=2, help="Number of camera trajectory frames."
+        ),
+    ] = 120,
+    repeats: Annotated[int, typer.Option(min=1)] = 3,
+    seed: Annotated[int, typer.Option()] = 42,
 ) -> None:
     """Benchmark full rasterization over a continuous camera trajectory."""
     run(
