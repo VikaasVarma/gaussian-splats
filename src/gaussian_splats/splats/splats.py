@@ -42,7 +42,11 @@ class GaussianSplat(nn.Module):
 
     @classmethod
     def from_checkpoint(cls, checkpoint: str | Path) -> Self:
-        state = torch.load(checkpoint, map_location="cpu", weights_only=True)
+        from .ply import load_ply
+
+        checkpoint = Path(checkpoint)
+        state = load_ply(checkpoint)
+
         splats = cls(len(state["mean"]), int(state["color"].shape[1] ** 0.5) - 1)
         splats.load_state_dict(state)
         return splats
