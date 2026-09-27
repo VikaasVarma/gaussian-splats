@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blender viewer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <canvas id="viewer">Blender viewer</canvas>
+    <details id="hud" class="panel" open>
+      <summary>Statistics</summary>
+      <div id="stats">Waiting for a scene</div>
+      <div id="fps-chart"></div>
+      <footer>Click the canvas to look · WASD to move · Space/Shift up/down · H toggles HUD</footer>
+    </details>
+    <details id="settings" class="panel">
+      <summary>Scene</summary>
+      <form>
+        <label class="file-picker" for="scene">
+          <span>Scene</span>
+          <strong id="scene-name">No file selected</strong>
+          <input id="scene" type="file" accept=".gltf,.glb" />
+        </label>
+        <label>Renderer <select id="renderer"></select></label>
+        <div id="status">Choose a glTF or GLB scene</div>
+      </form>
+    </details>
+    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"></script>
+    <script type="module" src="/blender.js"></script>
+  </body>
+</html>

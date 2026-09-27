@@ -24,12 +24,13 @@ def project(
     camera: Camera,
     indices: torch.Tensor | None = None,
 ) -> ProjectedGaussianSplat:
-    (mean, rotation, scale, opacity, color) = (
+    (mean, rotation, scale, opacity, color, normals) = (
         splats.mean,
         splats.rotation,
         splats.scale,
         splats.opacity,
         splats.color,
+        splats.normals,
     )
     if indices is not None:
         mean = mean[indices]
@@ -37,6 +38,7 @@ def project(
         scale = scale[indices]
         opacity = opacity[indices]
         color = color[indices]
+        normals = normals[indices]
 
     # Project Gaussian means and covariances.
     mean_world = mean
@@ -48,8 +50,9 @@ def project(
     direction = F.normalize(mean_world - camera.position, dim=-1)
     color = evaluate_sh(color, direction)
     opacity = opacity.sigmoid()
+    normals = normals @ camera.rotation_matrix.T
 
-    return ProjectedGaussianSplat(mean, covariance, color, opacity)
+    return ProjectedGaussianSplat(mean, covariance, color, opacity, normals)
 
 
 @timed
@@ -62,6 +65,7 @@ def cull(
         splats.covariance[visible],
         splats.color[visible],
         splats.opacity[visible],
+        None if splats.normals is None else splats.normals[visible],
     )
 
 

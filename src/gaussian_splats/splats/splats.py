@@ -16,6 +16,7 @@ class ProjectedGaussianSplat:
     covariance: torch.Tensor  # N x 2 x 2
     color: torch.Tensor  # N x 3
     opacity: torch.Tensor  # N x 1
+    normals: torch.Tensor | None = None  # N x 3 when retained after projection
 
     @cached_property
     def inverse_covariance(self) -> torch.Tensor:  # N x 2 x 2
@@ -28,6 +29,7 @@ class GaussianSplat(nn.Module):
     scale: torch.Tensor  # N x 3
     opacity: torch.Tensor  # N x 1
     color: torch.Tensor  # N x (sh_degree + 1) ** 2 x 3
+    normals: torch.Tensor  # N x 3
 
     def __init__(self, num_points: int, sh_degree: int = 3):
         super().__init__()
@@ -39,6 +41,12 @@ class GaussianSplat(nn.Module):
         color = torch.zeros(num_points, (sh_degree + 1) ** 2, 3)
         color[:, 0, :] = rgb_to_sh(torch.rand(num_points, 3))
         self.color = nn.Parameter(color)
+        self.normals = nn.Parameter(torch.zeros_like(self.mean))
+
+    def save_checkpoint(self, path: str | Path) -> None:
+        from .ply import save_ply
+
+        save_ply(self.state_dict(), path)
 
     @classmethod
     def from_checkpoint(cls, checkpoint: str | Path) -> Self:
@@ -48,7 +56,30 @@ class GaussianSplat(nn.Module):
         state = load_ply(checkpoint)
 
         splats = cls(len(state["mean"]), int(state["color"].shape[1] ** 0.5) - 1)
-        splats.load_state_dict(state)
+        splats.load_state_dict(state, strict=False)
+        return splats
+
+    @classmethod
+    def from_tensors(
+        cls,
+        mean: torch.Tensor,
+        rotation: torch.Tensor,
+        scale: torch.Tensor,
+        opacity: torch.Tensor,
+        color: torch.Tensor,
+        normals: torch.Tensor | None = None,
+    ) -> Self:
+        splats = cls(len(mean), int(color.shape[1] ** 0.5) - 1)
+
+        with torch.no_grad():
+            splats.mean = nn.Parameter(mean)
+            splats.rotation = nn.Parameter(rotation)
+            splats.scale = nn.Parameter(scale)
+            splats.opacity = nn.Parameter(opacity)
+            splats.color = nn.Parameter(color)
+            if normals is not None:
+                splats.normals = nn.Parameter(normals)
+
         return splats
 
     @property

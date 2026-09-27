@@ -49,6 +49,7 @@ def select_splats(splats: GaussianSplat, num_splats: int | None, seed: int) -> G
         selected.scale.copy_(splats.scale[indices])
         selected.opacity.copy_(splats.opacity[indices])
         selected.color.copy_(splats.color[indices])
+        selected.normals.copy_(splats.normals[indices])
 
     return selected
 

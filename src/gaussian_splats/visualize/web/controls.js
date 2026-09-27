@@ -1,29 +1,44 @@
-export const bindControls = (viewer, hud) => {
+export function bindControls(canvas, { endpoint, hud }) {
   const keys = new Set();
-  const axis = (positive, negative) => Number(keys.has(positive)) - Number(keys.has(negative));
   let look = [0, 0];
+  let pending = false;
 
-  viewer.onclick = () => viewer.requestPointerLock();
-  document.onkeydown = event => {
-    keys.add(event.code);
-    if (event.code === "KeyH" && !event.repeat) hud.open = !hud.open;
-  };
-  document.onkeyup = event => keys.delete(event.code);
-  document.onmousemove = event => {
-    if (document.pointerLockElement !== viewer) return;
-    look[0] += event.movementX;
-    look[1] += event.movementY;
-  };
+  canvas.tabIndex = 0;
+  canvas.addEventListener("click", () => canvas.requestPointerLock());
+  window.addEventListener("keydown", event => {
+    if (["KeyW", "KeyA", "KeyS", "KeyD", "Space", "ShiftLeft", "ShiftRight"].includes(event.code)) {
+      event.preventDefault();
+      keys.add(event.code);
+    }
+    if (event.code === "KeyH" && !event.repeat && hud) hud.open = !hud.open;
+  });
+  window.addEventListener("keyup", event => keys.delete(event.code));
+  window.addEventListener("mousemove", event => {
+    if (document.pointerLockElement === canvas) {
+      look[0] += event.movementX;
+      look[1] += event.movementY;
+    }
+  });
 
-  setInterval(() => {
-    const vertical = Number(keys.has("Space")) - Number(keys.has("ShiftLeft") || keys.has("ShiftRight"));
-    const move = [axis("KeyD", "KeyA"), vertical, axis("KeyW", "KeyS")];
-    if (!move.some(Boolean) && !look.some(Boolean)) return;
-    fetch("/camera", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ move, look, dt: 1 / 60 }),
-    }).catch(console.error);
+  setInterval(async () => {
+    const move = [
+      Number(keys.has("KeyD")) - Number(keys.has("KeyA")),
+      Number(keys.has("Space")) - Number(keys.has("ShiftLeft") || keys.has("ShiftRight")),
+      Number(keys.has("KeyW")) - Number(keys.has("KeyS")),
+    ];
+    if (pending || (!move.some(Boolean) && !look.some(Boolean))) return;
+
+    const currentLook = look;
     look = [0, 0];
-  }, 1000 / 60);
-};
+    pending = true;
+    try {
+      await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ move, look: currentLook, dt: 1 / 20 }),
+      });
+    } finally {
+      pending = false;
+    }
+  }, 50);
+}
