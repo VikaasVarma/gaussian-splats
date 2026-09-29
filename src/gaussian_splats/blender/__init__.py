@@ -1,12 +1,16 @@
-from .api import CAMERA_RENDERERS, RENDERERS, CyclesSession, Scene, fit_camera, query_rays
+from .api import CAMERA_RENDERERS, RENDERERS, BlenderSession, Scene, fit_camera
+from .color import linear_to_srgb, srgb_to_linear
+from .render import BlenderCameraRenderer
 
 renderers = RENDERERS
 
 __all__ = [
-    "CyclesSession",
+    "BlenderSession",
+    "BlenderCameraRenderer",
+    "linear_to_srgb",
     "CAMERA_RENDERERS",
     "Scene",
     "fit_camera",
-    "query_rays",
+    "srgb_to_linear",
     "renderers",
 ]

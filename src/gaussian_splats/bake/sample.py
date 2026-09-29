@@ -28,7 +28,7 @@ def sample_splats(
     resolution: int | None = None,
     n_splats: int | None = None,
     sigma: float = 0.65,
-) -> GaussianSplat:
+) -> tuple[GaussianSplat, torch.Tensor, torch.Tensor]:
     assert not (resolution is None == n_splats is None), (
         "Please provide exactly one of resolution or n_splats"
     )
@@ -86,11 +86,15 @@ def sample_splats(
     opacity = positions.new_full((n_splats, 1), math.log(1e6))
     color = positions.new_zeros((n_splats, 1, 3))
 
-    return GaussianSplat.from_tensors(
-        mean=positions,
-        rotation=rotation,
-        scale=scale.expand_as(positions),
-        opacity=opacity,
-        color=color,
-        normals=normals,
+    return (
+        GaussianSplat.from_tensors(
+            mean=positions,
+            rotation=rotation,
+            scale=scale.expand_as(positions),
+            opacity=opacity,
+            color=color,
+            normals=normals,
+        ),
+        triangle_id,
+        barycentric,
     )

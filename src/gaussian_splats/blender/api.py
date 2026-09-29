@@ -10,7 +10,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from PIL import Image
 
 from gaussian_splats.splats.camera import PinholeCamera
 
@@ -24,6 +23,11 @@ class Scene:
     vertices: torch.Tensor  # T x 3 x 3
     normals: torch.Tensor  # T x 3 x 3
     mesh_id: torch.Tensor  # T
+    uvs: torch.Tensor  # T x 3 x 2
+    material_id: torch.Tensor  # T
+    material_color: torch.Tensor  # M x 4
+    texture_rect: torch.Tensor  # M x 4: x, y, width, height
+    texture_atlas: torch.Tensor  # H x W x 4
 
     def to(self, device: torch.device) -> Scene:
         return Scene(
@@ -31,6 +35,11 @@ class Scene:
             self.vertices.to(device),
             self.normals.to(device),
             self.mesh_id.to(device),
+            self.uvs.to(device),
+            self.material_id.to(device),
+            self.material_color.to(device),
+            self.texture_rect.to(device),
+            self.texture_atlas.to(device),
         )
 
     @cached_property
@@ -67,31 +76,25 @@ def fit_camera(scene: Scene) -> PinholeCamera:
     return PinholeCamera(rotation=rotation).fit_to_points(points)
 
 
-class CyclesSession:
+class BlenderSession:
     def __init__(
         self,
         mesh: str | Path,
         executable: str | Path = "blender",
-        samples: int = 1,
-        batch_size: int = 4096,
     ) -> None:
         self.mesh = Path(mesh)
         self.executable = executable
-        self.samples = samples
-        self.batch_size = batch_size
         self.scene: Scene | None = None
         self._process: subprocess.Popen[str] | None = None
         self._directory: tempfile.TemporaryDirectory[str] | None = None
         self._request = 0
 
-    def __enter__(self) -> CyclesSession:
+    def __enter__(self) -> BlenderSession:
         if not self.mesh.is_file():
             raise FileNotFoundError(self.mesh)
-        if not 1 <= self.batch_size <= 4096:
-            raise ValueError("batch_size must be between 1 and 4096")
         executable = shutil.which(str(self.executable)) or str(self.executable)
         worker = Path(__file__).with_name("worker.py")
-        self._directory = tempfile.TemporaryDirectory(prefix="gaussian-splats-cycles-")
+        self._directory = tempfile.TemporaryDirectory(prefix="gaussian-splats-blender-")
         directory = Path(self._directory.name)
         scene_path = directory / "scene.npz"
         self._process = subprocess.Popen(
@@ -102,8 +105,6 @@ class CyclesSession:
                 str(worker),
                 "--",
                 str(self.mesh.resolve()),
-                str(self.samples),
-                str(self.batch_size),
                 str(scene_path),
                 "--server",
             ],
@@ -116,13 +117,18 @@ class CyclesSession:
         output = self._read_until("READY")
         if output is not None or not scene_path.is_file():
             self.__exit__(None, None, None)
-            raise RuntimeError(f"Blender Cycles session failed to start:\n{output or ''}")
+            raise RuntimeError(f"Blender session failed to start:\n{output or ''}")
         data = np.load(scene_path)
         self.scene = Scene(
             self.mesh,
             torch.from_numpy(data["positions"]),
             torch.from_numpy(data["normals"]),
             torch.from_numpy(data["mesh_id"]),
+            torch.from_numpy(data["uvs"]),
+            torch.from_numpy(data["material_id"]),
+            torch.from_numpy(data["material_color"]),
+            torch.from_numpy(data["texture_rect"]),
+            torch.from_numpy(data["texture_atlas"]),
         )
         return self
 
@@ -142,67 +148,39 @@ class CyclesSession:
         self._directory = None
         self.scene = None
 
-    def query(
+    def request(
         self,
-        origins: np.ndarray,
-        directions: np.ndarray,
-        footprints: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        input_path, output_path = self._request_paths("query", ".result.npz")
-        np.savez(input_path, origins=origins, directions=directions, footprints=footprints)
-        self._send({"command": "query", "input": str(input_path), "output": str(output_path)})
-        output = self._read_until("RESULT")
+        command: dict[str, object],
+        arrays: dict[str, np.ndarray] | None = None,
+        output_suffix: str = ".result.npz",
+        marker: str = "RESULT",
+    ) -> Path:
+        input_path, output_path = self._request_paths(command["command"], output_suffix)
+        if arrays is not None:
+            np.savez(input_path, **arrays)
+            command = {**command, "input": str(input_path)}
+        self._send({**command, "output": str(output_path)})
+        output = self._read_until(marker)
         if output is not None:
-            raise RuntimeError(f"Blender Cycles query failed:\n{output}")
-        result = np.load(output_path)
-        return result["colors"], result["alphas"], result["hits"]
-
-    def render_camera(self, camera: PinholeCamera, width: int, height: int) -> torch.Tensor:
-        return self.render(camera, width, height, "cycles")
-
-    def render(
-        self,
-        camera: PinholeCamera,
-        width: int,
-        height: int,
-        renderer: str = "cycles",
-    ) -> torch.Tensor:
-        if renderer not in CAMERA_RENDERERS:
-            raise ValueError(f"Unsupported camera renderer: {renderer}")
-        _, output_path = self._request_paths("render", ".png")
-        request = {
-            "command": "render",
-            "renderer": renderer,
-            "output": str(output_path),
-            "width": width,
-            "height": height,
-            "position": camera.position.tolist(),
-            "rotation": camera.rotation_matrix.tolist(),
-            "focal_length": list(camera.focal_length),
-        }
-        self._send(request)
-        output = self._read_until("RENDER_RESULT")
-        if output is not None:
-            raise RuntimeError(f"Blender Cycles render failed:\n{output}")
-        image = np.array(Image.open(output_path).convert("RGB"), copy=True)
-        return torch.from_numpy(image).float() / 255
+            raise RuntimeError(f"Blender request failed:\n{output}")
+        return output_path
 
     def _request_paths(self, kind: str, suffix: str = ".npz") -> tuple[Path, Path]:
         if self._directory is None:
-            raise RuntimeError("CyclesSession must be entered before querying")
+            raise RuntimeError("BlenderSession must be entered before querying")
         request = Path(self._directory.name) / f"request-{self._request:05d}-{kind}"
         self._request += 1
         return request.with_suffix(".input.npz"), request.with_suffix(suffix)
 
     def _send(self, request: dict[str, object]) -> None:
         if self._process is None or self._process.stdin is None:
-            raise RuntimeError("CyclesSession must be entered before sending requests")
+            raise RuntimeError("BlenderSession must be entered before sending requests")
         self._process.stdin.write(json.dumps(request) + "\n")
         self._process.stdin.flush()
 
     def _read_until(self, marker: str) -> str | None:
         if self._process is None or self._process.stdout is None:
-            raise RuntimeError("CyclesSession is not running")
+            raise RuntimeError("BlenderSession is not running")
         logs = []
         for line in self._process.stdout:
             if line.startswith(marker):
@@ -211,16 +189,3 @@ class CyclesSession:
             if self._process.poll() is not None:
                 break
         return "".join(logs)
-
-
-def query_rays(
-    mesh: str | Path,
-    origins: np.ndarray,
-    directions: np.ndarray,
-    footprints: np.ndarray,
-    executable: str | Path = "blender",
-    samples: int = 1,
-    batch_size: int = 4096,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    with CyclesSession(mesh, executable, samples, batch_size) as session:
-        return session.query(origins, directions, footprints)

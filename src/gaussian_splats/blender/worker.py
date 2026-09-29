@@ -121,9 +121,42 @@ def configure_camera(scene, renderer: str, samples: int) -> None:
     scene.render.image_settings.file_format = "PNG"
 
 
+def _material_info(material):
+    color = np.asarray(material.diffuse_color[:], dtype=np.float32)
+    image = None
+    if material.use_nodes:
+        shader = next(
+            (node for node in material.node_tree.nodes if node.type == "BSDF_PRINCIPLED"),
+            None,
+        )
+        if shader is not None:
+            base_color = shader.inputs.get("Base Color")
+            if base_color is not None:
+                color = np.asarray(base_color.default_value[:], dtype=np.float32)
+                if base_color.is_linked and base_color.links[0].from_node.type == "TEX_IMAGE":
+                    image = base_color.links[0].from_node.image
+    return color, image
+
+
 def extract_scene(scene, path: Path) -> None:
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    positions, normals, mesh_ids = [], [], []
+    positions, normals, uvs, material_ids, mesh_ids = [], [], [], [], []
+    materials, material_images, material_lookup = [], [], {}
+
+    def get_material_id(material):
+        key = material.as_pointer() if material is not None else None
+        if key not in material_lookup:
+            color, image = (
+                _material_info(material)
+                if material is not None
+                else (np.array((0.8, 0.8, 0.8, 1), dtype=np.float32), None)
+            )
+            material_lookup[key] = len(materials)
+            materials.append(color)
+            material_images.append(image)
+        return material_lookup[key]
+
+    get_material_id(None)
     for mesh_index, object_ in enumerate(
         object_ for object_ in scene.objects if object_.type == "MESH"
     ):
@@ -134,30 +167,67 @@ def extract_scene(scene, path: Path) -> None:
             if not len(mesh.loop_triangles):
                 continue
             vertex_positions = np.empty((len(mesh.vertices), 3), dtype=np.float32)
-            vertex_normals = np.empty_like(vertex_positions)
+            corner_normals = np.empty((len(mesh.corner_normals), 3), dtype=np.float32)
             triangle_indices = np.empty((len(mesh.loop_triangles), 3), dtype=np.int32)
+            triangle_loops = np.empty_like(triangle_indices)
             mesh.vertices.foreach_get("co", vertex_positions.ravel())
-            mesh.vertices.foreach_get("normal", vertex_normals.ravel())
+            mesh.corner_normals.foreach_get("vector", corner_normals.ravel())
             mesh.loop_triangles.foreach_get("vertices", triangle_indices.ravel())
+            mesh.loop_triangles.foreach_get("loops", triangle_loops.ravel())
             transform = np.asarray(object_.matrix_world, dtype=np.float32)
             linear = transform[:3, :3]
             positions.append(vertex_positions[triangle_indices] @ linear.T + transform[:3, 3])
             normal_matrix = np.linalg.inv(linear).T
-            triangle_normals = vertex_normals[triangle_indices] @ normal_matrix.T
-            triangle_normals /= np.linalg.norm(triangle_normals, axis=-1, keepdims=True).clip(
-                min=1e-8
-            )
+            triangle_normals = corner_normals[triangle_loops] @ normal_matrix.T
+            triangle_normals /= np.linalg.norm(
+                triangle_normals, axis=-1, keepdims=True
+            ).clip(min=1e-8)
             normals.append(triangle_normals)
+            uv_layer = mesh.uv_layers.active
+            if uv_layer is None:
+                uvs.append(np.zeros((len(triangle_indices), 3, 2), dtype=np.float32))
+            else:
+                loop_uvs = np.empty((len(mesh.loops), 2), dtype=np.float32)
+                uv_layer.data.foreach_get("uv", loop_uvs.ravel())
+                uvs.append(loop_uvs[triangle_loops])
+            slots = [get_material_id(slot.material) for slot in object_.material_slots]
+            triangle_materials = np.zeros(len(triangle_indices), dtype=np.int64)
+            for index, triangle in enumerate(mesh.loop_triangles):
+                if triangle.material_index < len(slots):
+                    triangle_materials[index] = slots[triangle.material_index]
+            material_ids.append(triangle_materials)
             mesh_ids.append(np.full(len(triangle_indices), mesh_index, dtype=np.int64))
         finally:
             evaluated.to_mesh_clear()
     if not positions:
         raise RuntimeError("glTF scene contains no mesh triangles")
+
+    images = [image for image in material_images if image is not None]
+    atlas_width = sum(int(image.size[0]) for image in images) or 1
+    atlas_height = max((int(image.size[1]) for image in images), default=1)
+    atlas = np.ones((atlas_height, atlas_width, 4), dtype=np.float32)
+    texture_rects = np.full((len(materials), 4), -1, dtype=np.int32)
+    image_offsets, x_offset = {}, 0
+    for image in images:
+        width, height = map(int, image.size)
+        pixels = np.asarray(image.pixels[:], dtype=np.float32).reshape(height, width, 4)
+        atlas[:height, x_offset : x_offset + width] = np.flip(pixels, axis=0)
+        image_offsets[image.as_pointer()] = (x_offset, 0, width, height)
+        x_offset += width
+    for index, image in enumerate(material_images):
+        if image is not None:
+            texture_rects[index] = image_offsets[image.as_pointer()]
+
     np.savez(
         path,
         positions=np.concatenate(positions, axis=0),
         normals=np.concatenate(normals, axis=0),
+        uvs=np.concatenate(uvs, axis=0),
+        material_id=np.concatenate(material_ids, axis=0),
         mesh_id=np.concatenate(mesh_ids, axis=0),
+        material_color=np.stack(materials),
+        texture_rect=texture_rects,
+        texture_atlas=atlas,
     )
 
 
@@ -254,13 +324,11 @@ def query(scene, origins, directions, footprints, workdir, request, samples, bat
 
 def main() -> None:
     arguments = sys.argv[sys.argv.index("--") + 1 :]
-    scene_path, samples, batch_size, scene_output = arguments[:4]
-    samples, batch_size = int(samples), int(batch_size)
-    server = len(arguments) > 4 and arguments[4] == "--server"
+    scene_path, scene_output = arguments[:2]
+    server = "--server" in arguments
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=str(Path(scene_path).resolve()))
     scene = bpy.context.scene
-    configure_cycles(scene, samples)
     extract_scene(scene, Path(scene_output))
     print("READY", flush=True)
     if not server:
@@ -280,12 +348,11 @@ def main() -> None:
                 data["footprints"],
                 input_path.parent,
                 output_path.name.removesuffix(".result.npz"),
-                samples,
-                batch_size,
+                int(request["samples"]),
+                int(request["batch_size"]),
             )
             print(f"RESULT {output_path}", flush=True)
         elif request["command"] == "render":
-            request["samples"] = samples
             render_camera(scene, request)
             print(f"RENDER_RESULT {request['output']}", flush=True)
 
