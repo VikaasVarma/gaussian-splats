@@ -7,7 +7,7 @@ body.viewer-container { height: 100vh; overflow: hidden; }
 .home-panel { display: grid; gap: .75rem; min-width: min(360px, calc(100% - 2rem)); }
 .home-panel h1 { margin: 0 0 .5rem; font-size: 1.4rem; }
 .home-panel a { color: #58a6ff; }
-.comparison-labels { position: fixed; inset: auto 0 1rem; display: flex; justify-content: space-around; pointer-events: none; color: #f0f3f6; text-shadow: 0 1px 3px #000; }
+.bake-labels { position: fixed; inset: auto 0 1rem; display: flex; justify-content: space-around; pointer-events: none; color: #f0f3f6; text-shadow: 0 1px 3px #000; }
 .panel {
   position: absolute; z-index: 1; top: 1rem; max-width: min(420px, calc(100% - 2rem));
   box-sizing: border-box; padding: .75rem; color: #f0f3f6;

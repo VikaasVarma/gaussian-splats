@@ -3,17 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Scene Renderer</title>
+    <title>Workbench / Gaussian splats</title>
     <link rel="stylesheet" href="/shared/styles.css" />
   </head>
   <body data-endpoint="/bake">
+    <div class="bake-labels"><span id="left-label">Workbench (Torch)</span><span>Gaussian splats</span></div>
     <details id="settings" class="panel">
-      <summary>Scene Renderer</summary>
+      <summary>Bake</summary>
       <form>
         <label>Scene <input id="scene" type="file" accept=".gltf,.glb" /></label>
-        <label>Renderer <select id="renderer" name="renderer"></select></label>
+        <label>Renderer <select name="renderer"></select></label>
         <div id="renderer-settings"></div>
-        <button id="clear" type="button">Clear scene</button>
+        <label>Splats <input name="num_splats" type="number" required min="1" value="10000" /></label>
+        <button id="bake" type="button" disabled>Bake Workbench → Splats</button>
+        <button id="pause" type="button">Pause scene</button>
+        <output id="count"></output>
         <div id="status">Choose a glTF or GLB scene</div>
       </form>
     </details>

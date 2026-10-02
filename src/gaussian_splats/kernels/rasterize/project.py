@@ -128,17 +128,18 @@ def _project_and_count_kernel(
         mx * cr10 + my * cr11 + mz * cr12 + ty,
         mx * cr20 + my * cr21 + mz * cr22 + tz,
     )
+    depth = -camera_z
     safe_z = tl.where(  # clamp abs min to 1e-4
-        camera_z > 0,
-        tl.maximum(1e-4, camera_z),
-        tl.minimum(-1e-4, camera_z),
+        depth > 0,
+        tl.maximum(1e-4, depth),
+        tl.minimum(-1e-4, depth),
     )
 
     # Project Gaussian means and covariances (assumed PinholeCamera).
-    pixel_x, pixel_y = (fx * camera_x / safe_z + cx, fy * camera_y / safe_z + cy)
+    pixel_x, pixel_y = (fx * camera_x / safe_z + cx, -fy * camera_y / safe_z + cy)
     tl.store(projected_mean + index * 3, pixel_x)
     tl.store(projected_mean + index * 3 + 1, pixel_y)
-    tl.store(projected_mean + index * 3 + 2, camera_z)
+    tl.store(projected_mean + index * 3 + 2, safe_z)
 
     qw, qx, qy, qz = (  # Normalize
         tl.load(rotation + index * 4),
@@ -161,8 +162,8 @@ def _project_and_count_kernel(
     inverse_z = 1.0 / safe_z
     j00, j02, j11, j12 = (
         fx * inverse_z,
-        -fx * cov_x * inverse_z * inverse_z,
-        fy * inverse_z,
+        fx * cov_x * inverse_z * inverse_z,
+        -fy * inverse_z,
         -fy * cov_y * inverse_z * inverse_z,
     )
     jc00, jc01, jc02, jc10, jc11, jc12 = (
@@ -248,7 +249,7 @@ def _project_and_count_kernel(
 
     # Cull
     count = (tile_max_x - tile_min_x) * (tile_max_y - tile_min_y)
-    count = tl.where((camera_z > near) & (camera_z < far), count, 0)
+    count = tl.where((safe_z > near) & (safe_z < far), count, 0)
     tl.store(counts + index, count)
 
 

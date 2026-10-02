@@ -37,10 +37,10 @@ def project_gaussians(
     mean = mean @ camera_rotation.T + camera_translation
     x, y, z = mean.unbind(dim=-1)
     z = torch.where(z.abs() >= 1e-4, z, torch.sign(z) * 1e-4)
-    intrinsics = mean.new_tensor(((fx, 0, cx), (0, fy, cy), (0, 0, 1)))
+    intrinsics = mean.new_tensor(((fx, 0, -cx), (0, -fy, -cy), (0, 0, -1)))
     mean = mean @ intrinsics.T
     mean = mean[:, :2] / mean[:, 2:]
-    mean = torch.cat((mean, z[:, None]), dim=-1)
+    mean = torch.cat((mean, -z[:, None]), dim=-1)
 
     tan_half_fov_x = image_width / (2 * fx)
     tan_half_fov_y = image_height / (2 * fy)

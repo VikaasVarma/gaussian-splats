@@ -111,6 +111,7 @@ class WorkbenchBackend(RayBackend, RenderBackend):
             directions[hit],
             triangle_ids[hit],
             barycentric[hit],
+            studio_directions=None,
         )
         image[hit] = color[:, :3]
         return linear_to_srgb(image.view(height, width, 3)).clamp(0, 1)

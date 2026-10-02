@@ -49,7 +49,7 @@ def generate_pinhole_rays(
         (
             (x - width / 2) / fx,
             (height / 2 - y) / fy,
-            torch.ones_like(x),
+            -torch.ones_like(x),
         ),
         dim=-1,
     )

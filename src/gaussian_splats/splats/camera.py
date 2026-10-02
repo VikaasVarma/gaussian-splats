@@ -49,7 +49,7 @@ class Camera(ABC):
 
 @dataclass(kw_only=True)
 class PinholeCamera(Camera):
-    """OpenCV pinhole camera with a world-to-camera quaternion."""
+    """OpenGL/Blender pinhole camera with a world-to-camera quaternion."""
 
     focal_length: tuple[float, float] = (500.0, 500.0)
     principal_point: tuple[float, float] = (320.0, 240.0)
@@ -60,9 +60,9 @@ class PinholeCamera(Camera):
         cx, cy = self.principal_point
         self.intrinsics = torch.tensor(
             [
-                [fx, 0, cx],
-                [0, fy, cy],
-                [0, 0, 1],
+                [fx, 0, -cx],
+                [0, -fy, -cy],
+                [0, 0, -1],
             ],
             dtype=self.dtype,
             device=self.device,
@@ -87,13 +87,14 @@ class PinholeCamera(Camera):
         # Transform gaussian means to pixel space
         mean = mean @ camera_rotation.T + self.translation
         x, y, z = mean.unbind(dim=-1)
-        z = torch.where(z.abs() >= 1e-4, z, torch.sign(z) * 1e-4)
+        depth = -z
+        depth = torch.where(depth.abs() >= 1e-4, depth, torch.sign(depth) * 1e-4)
         fx, fy = self.focal_length
         width, height = self.image_size
 
         mean = mean @ self.intrinsics.T
         mean = mean[:, :2] / mean[:, 2:]
-        mean = torch.cat((mean, z[:, None]), dim=-1)
+        mean = torch.cat((mean, depth[:, None]), dim=-1)
 
         # Linearize the perspective projection around each Gaussian mean.
         tan_half_fov_x = width / (2 * fx)
@@ -101,12 +102,12 @@ class PinholeCamera(Camera):
         zero = torch.zeros_like(z)
         jacobian = torch.stack(
             (
-                fx / z,
+                fx / depth,
                 zero,
-                -fx * (x / z).clamp(-1.3 * tan_half_fov_x, 1.3 * tan_half_fov_x) / z,
+                fx * (x / depth).clamp(-1.3 * tan_half_fov_x, 1.3 * tan_half_fov_x) / depth,
                 zero,
-                fy / z,
-                -fy * (y / z).clamp(-1.3 * tan_half_fov_y, 1.3 * tan_half_fov_y) / z,
+                -fy / depth,
+                -fy * (y / depth).clamp(-1.3 * tan_half_fov_y, 1.3 * tan_half_fov_y) / depth,
             ),
             dim=-1,
         ).view(-1, 2, 3)
@@ -132,6 +133,6 @@ class PinholeCamera(Camera):
         distance = 1.1 * radius / math.sin(math.atan(tan_half_fov))
 
         rotation = self.rotation_matrix
-        position = center - distance * rotation[2]
+        position = center + distance * rotation[2]
         self.translation.copy_(-(rotation @ position))
         return self

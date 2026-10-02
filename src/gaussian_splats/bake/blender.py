@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 import tempfile
@@ -19,9 +20,12 @@ RENDERERS = CAMERA_RENDERERS
 
 
 def fit_camera(scene: Scene) -> PinholeCamera:
-    # Transform Blnder (Z-up) to Ours (Y-up)
     points = scene.vertices.reshape(-1, 3)
-    rotation = torch.tensor([0.0, 0.0, 2**-0.5, 2**-0.5], dtype=points.dtype, device=points.device)
+    rotation = torch.tensor(
+        [math.cos(math.pi / 8), -math.sin(math.pi / 8), 0.0, 0.0],
+        dtype=points.dtype,
+        device=points.device,
+    )
     return PinholeCamera(rotation=rotation).fit_to_points(points)
 
 

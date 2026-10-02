@@ -2,7 +2,7 @@
 
 Run `uv run visualize` from the project root. `/` is a small page registry;
 `/gaussian` shows checkpoints;
-`/bake` and `/blender` show Blender/Cycles/Workbench; `/compare` bakes Workbench
+`/scene` and `/blender` show Blender/Cycles/Workbench; `/bake` bakes Workbench
 splats and renders both views with one camera. Existing frame, camera, checkpoint,
 scene, renderer-list, and bake URLs remain available. Page URLs redirect to a
 trailing slash so their relative scripts resolve within the page folder.
@@ -123,6 +123,6 @@ uv run ruff check src/gaussian_splats/visualize
 The suite checks routes/assets, checkpoint rendering and settings, timing values,
 camera movement, a fourth scratchpad with a custom action, serialized operations,
 temporary-file cleanup, and visible failures. With Blender installed it also
-checks all four renderers and scene loading/baking/comparison. Browser behavior
+checks all four renderers and scene loading/baking. Browser behavior
 requires a browser smoke test; Python endpoint tests do not cover pointer lock,
 DOM layout, charts, or JavaScript lifecycle.

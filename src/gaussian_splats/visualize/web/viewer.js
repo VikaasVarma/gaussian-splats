@@ -123,7 +123,7 @@ export function createViewer({
   const charts = createCharts(hud);
   const lifetime = new AbortController();
   const { signal } = lifetime;
-  let lastFrame = 0, fps = 0, animation, emptyTimer;
+  let lastFrame = 0, fps = 0, animation, emptyTimer, paused = false;
   const stopCamera = cameraControls(canvas, hud, endpoint, signal, fail);
   if (typeof settings !== "function") {
     const form = settings;
@@ -142,6 +142,7 @@ export function createViewer({
   }
 
   async function render() {
+    if (paused) return;
     const [width, height] = size();
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
@@ -150,7 +151,9 @@ export function createViewer({
     const params = new URLSearchParams({ ...settings(), width, height });
     const started = performance.now();
     const response = await request(`${endpoint}/frame.jpg?${params}`, { signal });
+    if (paused) return;
     if (response.status === 204) {
+      if (paused) return;
       status.textContent = emptyMessage;
       lastFrame = 0;
       emptyTimer = setTimeout(() => render().catch(fail), 500);
@@ -169,7 +172,17 @@ export function createViewer({
     stats.textContent = `FPS ${fps.toFixed(1)} · Frame ${milliseconds.toFixed(0)} ms`;
     status.textContent = "";
     onFrame({ response, fps, milliseconds, timings });
-    animation = requestAnimationFrame(() => render().catch(fail));
+    if (!paused) animation = requestAnimationFrame(() => render().catch(fail));
+  }
+
+  function pause() {
+    paused = true;
+  }
+
+  function resume() {
+    if (!paused) return;
+    paused = false;
+    render().catch(fail);
   }
 
   function dispose() {
@@ -182,5 +195,5 @@ export function createViewer({
 
   window.addEventListener("pagehide", dispose, { signal });
   render().catch(fail);
-  return { canvas, hud, dispose };
+  return { canvas, hud, pause, resume, dispose };
 }

@@ -40,7 +40,6 @@ def _quaternion_from_rotation(rotation: torch.Tensor) -> torch.Tensor:
 @dataclass
 class CameraController:
     camera: PinholeCamera
-    world_up: tuple[float, float, float] = (0.0, 1.0, 0.0)
     speed: float = 2.0
     sensitivity: float = 0.002
     yaw: float = 0.0
@@ -51,27 +50,29 @@ class CameraController:
 
     def __post_init__(self) -> None:
         self.position = self.camera.position
-        self.up_axis = self.position.new_tensor(self.world_up)
-        forward = self.camera.rotation_matrix[2]
+        self.up_axis = self.position.new_tensor((0.0, 0.0, 1.0))
+        forward = -self.camera.rotation_matrix[2]
         self.pitch = math.asin(float(forward.dot(self.up_axis).clamp(-1, 1)))
         self.forward_axis = forward - forward.dot(self.up_axis) * self.up_axis
+        if self.forward_axis.norm() < 1e-8:
+            self.forward_axis = self.position.new_tensor((0.0, 1.0, 0.0))
         self.forward_axis = self.forward_axis / self.forward_axis.norm().clamp_min(1e-8)
 
     def update(self, move: list[float], look: list[float], dt: float) -> None:
         self.yaw += look[0] * self.sensitivity
-        self.pitch = max(-1.57, min(1.57, self.pitch + look[1] * self.sensitivity))
+        self.pitch = max(-math.pi / 2, min(math.pi / 2, self.pitch + look[1] * self.sensitivity))
 
         sin_yaw, cos_yaw = math.sin(self.yaw), math.cos(self.yaw)
-        base_right = torch.linalg.cross(self.up_axis, self.forward_axis)
+        base_right = torch.linalg.cross(self.forward_axis, self.up_axis)
         forward = cos_yaw * self.forward_axis + sin_yaw * base_right
-        right = torch.linalg.cross(self.up_axis, forward)
+        right = torch.linalg.cross(forward, self.up_axis)
         up = self.up_axis
         direction = move[0] * right + move[1] * up + move[2] * forward
         self.position += self.speed * dt * direction / direction.norm().clamp_min(1)
 
         pitch_cos, pitch_sin = math.cos(self.pitch), math.sin(self.pitch)
         camera_forward = pitch_cos * forward + pitch_sin * up
-        camera_up = torch.linalg.cross(camera_forward, right)
-        rotation = torch.stack((right, camera_up, camera_forward))
+        camera_up = torch.linalg.cross(right, camera_forward)
+        rotation = torch.stack((right, camera_up, -camera_forward))
         self.camera.rotation = _quaternion_from_rotation(rotation)
         self.camera.translation = -(self.camera.rotation_matrix @ self.position)

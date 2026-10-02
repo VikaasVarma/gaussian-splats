@@ -220,9 +220,9 @@ def extract_scene(scene, path: Path) -> None:
             positions.append(vertex_positions[triangle_indices] @ linear.T + transform[:3, 3])
             normal_matrix = np.linalg.inv(linear).T
             triangle_normals = corner_normals[triangle_loops] @ normal_matrix.T
-            triangle_normals /= np.linalg.norm(
-                triangle_normals, axis=-1, keepdims=True
-            ).clip(min=1e-8)
+            triangle_normals /= np.linalg.norm(triangle_normals, axis=-1, keepdims=True).clip(
+                min=1e-8
+            )
             normals.append(triangle_normals)
             uv_layer = mesh.uv_layers.active
             if uv_layer is None:
@@ -304,9 +304,7 @@ def render_camera(scene, request: dict[str, object]) -> None:
     camera.data.sensor_width = 36
     camera.data.lens = float(request["focal_length"][0]) * 36 / width
     rotation = Matrix(request["rotation"])
-    camera.matrix_world = (
-        rotation.transposed() @ Matrix(((1, 0, 0), (0, 1, 0), (0, 0, -1)))
-    ).to_4x4()
+    camera.matrix_world = rotation.transposed().to_4x4()
     camera.location = request["position"]
     scene.camera = camera
     configure_camera(scene, str(request.get("renderer", "cycles")), int(request["samples"]))

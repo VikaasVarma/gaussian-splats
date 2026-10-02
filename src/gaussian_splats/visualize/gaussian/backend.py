@@ -1,10 +1,11 @@
+import math
 import os
 from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import torch
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse
 
 from gaussian_splats.splats.camera import PinholeCamera
 from gaussian_splats.splats.rasterize import rasterize
@@ -16,10 +17,15 @@ from gaussian_splats.visualize.server import Page, upload
 
 
 def render_gaussians(splats, camera, settings, width, height, rasterizer=rasterize):
+    if splats.num_points == 0:
+        return Frame(
+            splats.mean.new_zeros((height, width, 3)),
+            metadata={"X-Total-Splats": "0"},
+        )
     tile = int(settings.get("tile_size", 8))
     image_size = ((width + tile - 1) // tile * tile, (height + tile - 1) // tile * tile)
     camera = replace(camera, image_size=image_size, principal_point=(width / 2, height / 2))
-    count = max(1, min(int(settings.get("num_splats") or 10_000), splats.num_points))
+    count = min(max(1, int(settings.get("num_splats") or 10_000)), splats.num_points)
     options = {
         "tile_size": tile,
         "opacity_threshold": float(settings.get("opacity_threshold", 0.999)),
@@ -61,15 +67,13 @@ class GaussianViewer:
     def load_checkpoint(self, path, filename):
         device = self.splats.mean.device if self.splats is not None else default_device()
         splats = GaussianSplat.from_checkpoint(path).to(device).eval()
-        self.controller = CameraController(PinholeCamera().fit_to_points(splats.mean))
+        rotation = splats.mean.new_tensor(
+            [math.cos(math.pi / 8), -math.sin(math.pi / 8), 0.0, 0.0]
+        )
+        camera = PinholeCamera(rotation=rotation).fit_to_points(splats.mean)
+        self.controller = CameraController(camera)
         self.splats = splats
         self.checkpoint_name = filename
-
-    def clear(self):
-        self.splats = None
-        self.controller = None
-        self.checkpoint_name = ""
-        self.compiled_rasterizer = None
 
     def render(self, settings, width, height):
         if self.splats is None:
@@ -102,13 +106,8 @@ def page():
 
         return JSONResponse(await page.run(info))
 
-    async def clear(request):
-        await page.run(page.backend.clear)
-        return Response(status_code=204)
-
     page.extra_routes = [
         ("/checkpoint", checkpoint, ["POST"]),
         ("/checkpoint", checkpoint_info, ["GET"]),
-        ("/checkpoint/clear", clear, ["POST"]),
     ]
     return page

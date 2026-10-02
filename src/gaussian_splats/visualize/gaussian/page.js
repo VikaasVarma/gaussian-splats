@@ -1,4 +1,4 @@
-import { createViewer, post, request, upload } from "/shared/viewer.js";
+import { createViewer, request, upload } from "/shared/viewer.js";
 import { addResolution, loadUPlot, resolution } from "/common/components.js";
 
 const form = document.querySelector("form");
@@ -9,7 +9,7 @@ await loadUPlot();
 const checkpoint = await (await request(`${endpoint}/checkpoint`)).json();
 if (checkpoint.name) status.textContent = checkpoint.name;
 
-createViewer({
+const viewer = createViewer({
   endpoint,
   settings: form,
   emptyMessage: "Choose a checkpoint",
@@ -40,9 +40,15 @@ document.querySelector("#checkpoint").onchange = async event => {
   }
 };
 
-document.querySelector("#clear").onclick = async () => {
-  await post(`${endpoint}/checkpoint/clear`, {});
-  document.querySelector("#checkpoint").value = "";
-  document.querySelector("#splat-total").textContent = "/ --";
-  status.textContent = "Choose a checkpoint";
+document.querySelector("#pause").onclick = event => {
+  const button = event.currentTarget;
+  if (button.textContent === "Pause scene") {
+    viewer.pause();
+    button.textContent = "Resume scene";
+    status.textContent = "Paused";
+  } else {
+    viewer.resume();
+    button.textContent = "Pause scene";
+    status.textContent = "";
+  }
 };

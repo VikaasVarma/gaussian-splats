@@ -82,15 +82,16 @@ def _project_bwd_kernel(
     r21 = 2.0 * (qy * qz + qw * qx)
     r22 = 1.0 - 2.0 * (qx * qx + qy * qy)
 
-    inverse_z = 1.0 / camera_z
+    depth = -camera_z
+    inverse_z = 1.0 / depth
     normalized_x = camera_x * inverse_z
     normalized_y = camera_y * inverse_z
     x_grad_mul = ((normalized_x >= -lim_x) & (normalized_x <= lim_x)).to(tl.float32)
     y_grad_mul = ((normalized_y >= -lim_y) & (normalized_y <= lim_y)).to(tl.float32)
-    covariance_x = tl.minimum(lim_x, tl.maximum(-lim_x, normalized_x)) * camera_z
-    covariance_y = tl.minimum(lim_y, tl.maximum(-lim_y, normalized_y)) * camera_z
-    j00, j02 = fx * inverse_z, -fx * covariance_x * inverse_z * inverse_z
-    j11, j12 = fy * inverse_z, -fy * covariance_y * inverse_z * inverse_z
+    covariance_x = tl.minimum(lim_x, tl.maximum(-lim_x, normalized_x)) * depth
+    covariance_y = tl.minimum(lim_y, tl.maximum(-lim_y, normalized_y)) * depth
+    j00, j02 = fx * inverse_z, fx * covariance_x * inverse_z * inverse_z
+    j11, j12 = -fy * inverse_z, -fy * covariance_y * inverse_z * inverse_z
 
     # A = J @ camera_rotation @ gaussian_rotation @ diag(exp(scale)).
     jc00 = j00 * cr00 + j02 * cr20
@@ -193,7 +194,7 @@ def _project_bwd_kernel(
     gpz = 0.0
     gux = gpx * j00 + gpx * 0.0
     guy = gpy * j11
-    guz = gpz + gpx * j02 + gpy * j12
+    guz = -gpz + gpx * j02 + gpy * j12
     # gJ = gB @ (camera_rotation @ Rq)^T.
     m00 = cr00 * r00 + cr01 * r10 + cr02 * r20
     m01 = cr00 * r01 + cr01 * r11 + cr02 * r21
@@ -214,11 +215,11 @@ def _project_bwd_kernel(
     gj_j11 = gb10 * nr0 + gb11 * nr1 + gb12 * nr2
     gj_j12 = gb10 * kr0 + gb11 * kr1 + gb12 * kr2
 
-    gux += x_grad_mul * gj_j02 * (-fx * inverse_z * inverse_z)
+    gux += x_grad_mul * gj_j02 * (fx * inverse_z * inverse_z)
     guy += y_grad_mul * gj_j12 * (-fy * inverse_z * inverse_z)
     inverse_z3 = inverse_z * inverse_z * inverse_z
-    guz += gj_j00 * (-fx * inverse_z * inverse_z) + gj_j02 * 2.0 * fx * covariance_x * inverse_z3
-    guz += gj_j11 * (-fy * inverse_z * inverse_z) + gj_j12 * 2.0 * fy * covariance_y * inverse_z3
+    guz += gj_j00 * (fx * inverse_z * inverse_z) + gj_j02 * 2.0 * fx * covariance_x * inverse_z3
+    guz += gj_j11 * (-fy * inverse_z * inverse_z) - gj_j12 * 2.0 * fy * covariance_y * inverse_z3
 
     gmx = gux * cr00 + guy * cr10 + guz * cr20
     gmy = gux * cr01 + guy * cr11 + guz * cr21

@@ -100,13 +100,13 @@ async def upload(request, page, load, header, suffixes):
 def create_app(registrations=None):
     if registrations is None:
         from .bake.backend import page as bake_page
-        from .compare.backend import page as compare_page
         from .gaussian.backend import page as gaussian_page
+        from .scene.backend import page as scene_page
 
         registrations = [
             (("/gaussian",), gaussian_page()),
-            (("/bake", "/blender"), bake_page()),
-            (("/compare",), compare_page()),
+            (("/bake",), bake_page()),
+            (("/scene", "/blender"), scene_page()),
         ]
 
     @asynccontextmanager
