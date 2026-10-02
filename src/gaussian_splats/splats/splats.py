@@ -44,19 +44,16 @@ class GaussianSplat(nn.Module):
         self.normals = nn.Parameter(torch.zeros_like(self.mean))
 
     def save_checkpoint(self, path: str | Path) -> None:
-        from .ply import save_ply
-
-        save_ply(self.state_dict(), path)
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self.state_dict(), path)
 
     @classmethod
     def from_checkpoint(cls, checkpoint: str | Path) -> Self:
-        from .ply import load_ply
-
-        checkpoint = Path(checkpoint)
-        state = load_ply(checkpoint)
-
+        state = torch.load(checkpoint, map_location="cpu", weights_only=True)
         splats = cls(len(state["mean"]), int(state["color"].shape[1] ** 0.5) - 1)
-        splats.load_state_dict(state, strict=False)
+
+        splats.load_state_dict(state)
         return splats
 
     @classmethod

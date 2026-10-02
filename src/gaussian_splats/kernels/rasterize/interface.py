@@ -175,12 +175,12 @@ def _rasterize_setup_context(ctx, inputs, output) -> None:
 
 def _rasterize_backward(
     ctx,
-    grad_output: tuple[torch.Tensor, ...],
+    *grad_outputs: torch.Tensor | None,
 ) -> tuple[torch.Tensor | None, ...]:
     # This shit is AI generated and unverified
 
     """Run the reverse compositor and finish projection gradients."""
-    grad_output = grad_output[0]
+    grad_output = grad_outputs[0]
     assert ctx.rendering_mode == "gaussian", (
         "Backward gradients are only supported for Gaussian rendering."
     )
@@ -236,7 +236,7 @@ def _rasterize_backward(
         ctx.image_height,
     )
 
-    return (*gradients, *(None,) * 30)
+    return (*gradients, *(None,) * (19 - len(gradients)))
 
 
 torch.library.register_autograd(

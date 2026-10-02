@@ -1,84 +1,59 @@
-const LIMIT = 120;
 const COLORS = ["#58a6ff", "#7ee787", "#d29922", "#a371f7", "#39c5cf", "#ff7b72"];
 
-const plotOptions = (width, series, bands = []) => ({
-  width,
-  height: 120,
-  scales: { x: { time: false } },
-  axes: [
-    { stroke: "#9da7b3", grid: { stroke: "#333842" } },
-    { stroke: "#9da7b3", grid: { stroke: "#333842" } },
-  ],
-  legend: { show: true },
-  bands,
-  series,
-});
-
-const trim = data => {
-  if (data[0].length > LIMIT) data.forEach(series => series.shift());
-};
-
-export function createCharts(elements, width) {
-  if (typeof uPlot === "undefined") {
-    return { add() {}, resize() {} };
-  }
+export function createCharts(hud) {
+  const width = () => Math.max(100, hud.clientWidth - 24);
+  const options = series => ({
+    width: width(), height: 120,
+    scales: { x: { time: false } },
+    legend: { live: true },
+    axes: [
+      { stroke: "#9da7b3", grid: { stroke: "#333842" } },
+      { stroke: "#9da7b3", grid: { stroke: "#333842" } },
+    ],
+    series: [{ label: "" }, ...series],
+  });
   const fpsData = [[], []];
-  const fps = new uPlot(
-    plotOptions(width, [{}, { label: "FPS", stroke: "#7ee787", value: (_u, value) => `${value?.toFixed(1) ?? "--"} FPS` }]),
-    fpsData,
-    elements.fps,
-  );
-  let timing;
-  let timingData;
-  let timingNames = [];
+  const fps = new uPlot(options([{ label: "FPS", stroke: "#7ee787" }]),
+                        fpsData, hud.querySelector(".fps-chart"));
+  let timing, timingData, names = [];
+
+  function append(plot, data, values) {
+    data[0].push(performance.now() / 1000);
+    values.forEach((value, index) => data[index + 1].push(value));
+    if (data[0].length > 120) data.forEach(series => series.shift());
+    plot.setData(data);
+    plot.setCursor({ idx: data[0].length - 1 });
+  }
+
+  const observer = new ResizeObserver(() => {
+    if (!hud.open) return;
+    fps.setSize({ width: width(), height: 120 });
+    timing?.setSize({ width: width(), height: 120 });
+  });
+  observer.observe(hud);
 
   return {
     add(fpsValue, timings) {
-      const time = performance.now() / 1000;
-      fpsData[0].push(time);
-      fpsData[1].push(fpsValue);
-      trim(fpsData);
-      fps.setData(fpsData);
-
-      if (!elements.timing || !timings) return;
-      const names = Object.keys(timings);
-      if (names.join() !== timingNames.join()) {
+      append(fps, fpsData, [fpsValue]);
+      const next = Object.keys(timings);
+      if (JSON.stringify(next) !== JSON.stringify(names)) {
         timing?.destroy();
-        timingNames = names;
+        timing = undefined;
+        names = next;
         timingData = [[], ...names.map(() => [])];
-        timing = new uPlot(
-          plotOptions(
-            width,
-            [{}, ...names.map((name, index) => ({
-              label: name,
-              stroke: COLORS[index % COLORS.length],
-              fill: `${COLORS[index % COLORS.length]}99`,
-              value: (u, value, series, point) => {
-                if (value == null) return "--";
-                const lower = series > 1 ? u.data[series - 1][point] : 0;
-                return `${(value - lower).toFixed(1)} ms`;
-              },
-            }))],
-            names.map((_, index) => ({ series: [index + 1, index + 2] })),
-          ),
-          timingData,
-          elements.timing,
-        );
+        if (names.length) {
+          timing = new uPlot(options(names.map((name, index) => ({
+            label: name, stroke: COLORS[index % COLORS.length],
+            value: (_plot, value) => value == null ? "--" : `${value.toFixed(1)} ms`,
+          }))), timingData, hud.querySelector(".timing-chart"));
+        }
       }
-
-      timingData[0].push(time);
-      names.forEach((name, index) => {
-        const previous = index ? timingData[index][timingData[index].length - 1] : 0;
-        timingData[index + 1].push(previous + timings[name]);
-      });
-      trim(timingData);
-      timing.setData(timingData);
-      elements.total.textContent = `Total: ${names.reduce((sum, name) => sum + timings[name], 0).toFixed(1)} ms`;
+      if (timing) append(timing, timingData, names.map(name => timings[name]));
     },
-    resize(nextWidth) {
-      width = nextWidth;
-      fps.setSize({ width, height: 120 });
-      timing?.setSize({ width, height: 120 });
+    dispose() {
+      observer.disconnect();
+      fps.destroy();
+      timing?.destroy();
     },
   };
 }

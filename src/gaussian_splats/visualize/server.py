@@ -1,215 +1,157 @@
-"""Serve viewer frames over HTTP."""
+"""Shared HTTP transport for small, independent viewer pages."""
 
 import asyncio
 import json
-import os
-import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, asynccontextmanager
 from io import BytesIO
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any
 
 import typer
 import uvicorn
 from PIL import Image
 from starlette.applications import Starlette
-from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from .blender import BlenderViewer
-from .gaussian import CHECKPOINT_ENV, GaussianViewer
 
+class Page:
+    def __init__(self, factory, directory: Path):
+        self.factory = factory
+        self.directory = directory
+        self.extra_routes = []
 
-def encode_jpeg(image: Any) -> bytes:
-    output = BytesIO()
-    Image.fromarray((255 * image.clamp(0, 1)).byte().cpu().numpy(), "RGB").save(
-        output, format="JPEG", quality=75
-    )
-    return output.getvalue()
+    async def start(self, worker: ThreadPoolExecutor) -> None:
+        self.worker = worker
+        self.backend = await self.run(self.factory)
 
+    async def run(self, function, *args):
+        return await asyncio.wrap_future(self.worker.submit(function, *args))
 
-async def frame(request: Request) -> Response:
-    viewer = request.app.state.viewer
+    async def frame(self, request):
+        params = dict(request.query_params)
+        width, height = int(params.pop("width", 640)), int(params.pop("height", 480))
 
-    def render() -> Any:
-        with request.app.state.render_lock:
-            viewer.update_controls(request.app.state.pending_controls)
-            request.app.state.pending_controls.clear()
-            return viewer.render(request.query_params)
+        def render():
+            frame = self.backend.render(params, width, height)
+            if frame is None:
+                return Response(status_code=204, headers={"X-No-Scene": "1"})
+            output = BytesIO()
+            pixels = (255 * frame.image.clamp(0, 1)).byte().cpu().numpy()
+            Image.fromarray(pixels).save(output, format="JPEG", quality=75)
+            return Response(
+                output.getvalue(),
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Timings": json.dumps(frame.timings),
+                    **frame.metadata,
+                },
+            )
 
-    try:
-        result = await asyncio.wrap_future(request.app.state.render_executor.submit(render))
-    except Exception as error:
-        return JSONResponse({"error": str(error)}, status_code=500)
-    if result is None:
-        return Response(status_code=204, headers={"X-No-Scene": "1"})
-    headers = {
-        "Cache-Control": "no-store",
-        "X-Timings": json.dumps(result.timings),
-        **result.metadata,
-    }
-    return Response(encode_jpeg(result.image), media_type="image/jpeg", headers=headers)
+        return await self.run(render)
 
+    async def camera(self, request):
+        data = await request.json()
 
-def ping(request: Request) -> Response:
-    return Response(status_code=204)
+        def move():
+            if self.backend.controller is not None:
+                self.backend.controller.update(data["move"], data["look"], float(data["dt"]))
 
-
-async def control(request: Request) -> Response:
-    data = await request.json()
-    with request.app.state.render_lock:
-        request.app.state.pending_controls.append(data)
-    return Response(status_code=204)
-
-
-async def blender_frame(request: Request) -> Response:
-    viewer = request.app.state.blender_viewer
-    if viewer is None:
-        return JSONResponse({"error": request.app.state.blender_error}, status_code=503)
-
-    def render() -> Any:
-        with request.app.state.render_lock:
-            viewer.update_controls(request.app.state.blender_controls)
-            request.app.state.blender_controls.clear()
-            return viewer.render(request.query_params)
-
-    try:
-        result = await asyncio.wrap_future(request.app.state.render_executor.submit(render))
-    except Exception as error:
-        return JSONResponse({"error": str(error)}, status_code=500)
-    if result is None:
+        await self.run(move)
         return Response(status_code=204)
-    return Response(
-        encode_jpeg(result), media_type="image/jpeg", headers={"Cache-Control": "no-store"}
-    )
 
+    def script(self, request):
+        return FileResponse(self.directory / "page.js")
 
-async def blender_control(request: Request) -> Response:
-    data = await request.json()
-    with request.app.state.render_lock:
-        request.app.state.blender_controls.append(data)
-    return Response(status_code=204)
+    def routes(self, prefix):
+        async def index(request):
+            return FileResponse(self.directory / "index.html")
 
-
-async def blender_renderers(request: Request) -> Response:
-    viewer = request.app.state.blender_viewer
-    if viewer is None:
-        return JSONResponse({"error": request.app.state.blender_error}, status_code=503)
-    return JSONResponse(viewer.renderers)
-
-
-async def blender_scene(request: Request) -> Response:
-    viewer = request.app.state.blender_viewer
-    if viewer is None:
-        return JSONResponse({"error": request.app.state.blender_error}, status_code=503)
-    name = request.headers.get("X-Scene-Name", "scene.gltf")
-    suffix = Path(name).suffix.lower()
-    if suffix not in {".gltf", ".glb"}:
-        return JSONResponse({"error": "Only .gltf and .glb scenes are supported."}, status_code=415)
-    with NamedTemporaryFile(suffix=suffix, delete=False) as temporary:
-        path = Path(temporary.name)
-        try:
-            async for chunk in request.stream():
-                temporary.write(chunk)
-            temporary.close()
-            with request.app.state.render_lock:
-                future = request.app.state.render_executor.submit(viewer.load_scene, path)
-                await asyncio.wrap_future(future)
-        except Exception as error:
-            return JSONResponse({"error": str(error)}, status_code=400)
-        finally:
-            path.unlink(missing_ok=True)
-    return Response(status_code=204)
-
-
-def blender_page(request: Request) -> FileResponse:
-    return FileResponse(Path(__file__).parent / "web" / "blender.html")
-
-
-async def checkpoint(request: Request) -> Response:
-    filename = request.headers.get("X-Checkpoint-Name", "checkpoint.ply")
-    if Path(filename).suffix.lower() != ".ply":
-        return JSONResponse({"error": "Only .ply checkpoints are supported."}, status_code=415)
-
-    with NamedTemporaryFile(suffix=".ply", delete=False) as temporary:
-        path = Path(temporary.name)
-        try:
-            async for chunk in request.stream():
-                temporary.write(chunk)
-            temporary.close()
-            with request.app.state.render_lock:
-                future = request.app.state.render_executor.submit(
-                    request.app.state.viewer.load_checkpoint, path
-                )
-                await asyncio.wrap_future(future)
-                request.app.state.viewer.checkpoint_name = Path(filename).name
-        except Exception as error:
-            return JSONResponse({"error": str(error)}, status_code=400)
-        finally:
-            path.unlink(missing_ok=True)
-    return Response(status_code=204)
-
-
-def create_app() -> Starlette:
-    app = Starlette(
-        routes=[
-            Route("/frame.jpg", frame),
-            Route("/ping", ping),
-            Route("/camera", control, methods=["POST"]),
-            Route("/checkpoint", checkpoint, methods=["POST"]),
-            Route("/blender", blender_page),
-            Route("/blender/", blender_page),
-            Route("/blender/frame.jpg", blender_frame),
-            Route("/blender/camera", blender_control, methods=["POST"]),
-            Route("/blender/renderers", blender_renderers),
-            Route("/blender/scene", blender_scene, methods=["POST"]),
-            Mount(
-                "/",
-                app=StaticFiles(packages=[("gaussian_splats.visualize", "web")], html=True),
-            ),
+        routes = [
+            Route(prefix + "/", index),
+            Route(prefix + "/frame.jpg", self.frame),
+            Route(prefix + "/camera", self.camera, methods=["POST"]),
         ]
-    )
-    app.state.viewer = GaussianViewer.from_environment()
-    try:
-        app.state.blender_viewer = BlenderViewer.create()
-        app.state.blender_error = None
-    except RuntimeError as error:
-        app.state.blender_viewer = None
-        app.state.blender_error = str(error)
-    app.state.render_lock = threading.Lock()
-    app.state.pending_controls = []
-    app.state.blender_controls = []
-    app.state.render_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="viewer")
-    return app
+        if (self.directory / "page.js").is_file():
+            routes.append(Route(prefix + "/page.js", self.script))
+        routes.extend(
+            Route(prefix + path, handler, methods=methods)
+            for path, handler, methods in self.extra_routes
+        )
+        return routes
 
 
-def serve(
-    checkpoint: Path | None = None,
-    host: str = "127.0.0.1",
-    port: int = 7007,
-) -> None:
-    if checkpoint is not None:
-        if not checkpoint.is_file():
-            raise typer.BadParameter(f"Checkpoint does not exist: {checkpoint}")
-        os.environ[CHECKPOINT_ENV] = str(checkpoint)
-    else:
-        os.environ.pop(CHECKPOINT_ENV, None)
+async def upload(request, page, load, header, suffixes):
+    filename = Path(request.headers[header]).name
+    suffix = Path(filename).suffix.lower()
+    if suffix not in suffixes:
+        return JSONResponse({"error": f"Expected {', '.join(suffixes)}"}, status_code=415)
+    with NamedTemporaryFile(suffix=suffix) as temporary:
+        async for chunk in request.stream():
+            temporary.write(chunk)
+        temporary.flush()
+        await page.run(load, Path(temporary.name), filename)
+    return Response(status_code=204)
 
+
+def create_app(registrations=None):
+    if registrations is None:
+        from .bake.backend import page as bake_page
+        from .compare.backend import page as compare_page
+        from .gaussian.backend import page as gaussian_page
+
+        registrations = [
+            (("/gaussian",), gaussian_page()),
+            (("/bake", "/blender"), bake_page()),
+            (("/compare",), compare_page()),
+        ]
+
+    @asynccontextmanager
+    async def lifespan(app):
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="viewer") as worker:
+            cleanup = ExitStack()
+            try:
+                for _, page in registrations:
+                    await page.start(worker)
+                    close = getattr(page.backend, "close", None)
+                    if close is not None:
+                        cleanup.callback(close)
+                yield
+            finally:
+                await asyncio.wrap_future(worker.submit(cleanup.close))
+
+    async def ping(request):
+        return Response(status_code=204)
+
+    home = Path(__file__).parent / "home" / "index.html"
+
+    async def index(request):
+        return FileResponse(home)
+
+    routes = [Route("/", index), Route("/ping", ping)]
+    for prefixes, page in registrations:
+        for prefix in prefixes:
+            routes.extend(page.routes(prefix))
+    routes.append(Mount("/shared", StaticFiles(directory=Path(__file__).parent / "web")))
+    routes.append(Mount("/common", StaticFiles(directory=Path(__file__).parent / "common")))
+    return Starlette(debug=True, routes=routes, lifespan=lifespan)
+
+
+def serve(host: str = "127.0.0.1", port: int = 7007):
     typer.echo(f"Viewer: http://{host}:{port}")
     uvicorn.run(
         "gaussian_splats.visualize.server:create_app",
         factory=True,
         host=host,
         port=port,
-        log_level="warning",
-        reload=False,
+        log_level="info",
     )
 
 
-def main() -> None:
+def main():
     typer.run(serve)
 
 

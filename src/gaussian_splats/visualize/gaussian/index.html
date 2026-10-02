@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gaussian splats</title>
+    <link rel="stylesheet" href="/shared/styles.css" />
+  </head>
+  <body data-endpoint="/gaussian">
+    <details id="settings" class="panel">
+      <summary>Settings</summary>
+      <form>
+        <label>Checkpoint <input id="checkpoint" type="file" accept=".pt" /></label>
+        <label>Tile size <input name="tile_size" type="number" required min="1" value="8" /></label>
+        <label>Opacity threshold <input name="opacity_threshold" type="number" required min="0" max="1" step="0.001" value="0.999" /></label>
+        <label>Near plane <input name="near" type="number" required min="0" step="0.1" value="0.1" /></label>
+        <label>Far plane <input name="far" type="number" required min="0" step="1" value="100" /></label>
+        <label>Splats <span class="input-with-output"><input name="num_splats" type="number" required min="1" value="10000" /><output id="splat-total">/ --</output></span></label>
+        <label>Compile render <input name="compile_render" type="checkbox" value="1" /></label>
+        <label>Rendering <select name="rendering_mode"><option value="gaussian">Gaussian</option><option value="ellipsoid">Ellipsoid</option></select></label>
+        <label id="confidence-setting" class="subsetting" hidden>↳ Confidence <input name="confidence" type="number" required min="0.001" max="0.999" step="0.001" value="0.95" disabled /></label>
+        <button id="clear" type="button">Clear scene</button>
+        <div id="status">Choose a checkpoint</div>
+      </form>
+    </details>
+    <script type="module" src="page.js"></script>
+  </body>
+</html>

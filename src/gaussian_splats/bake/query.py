@@ -1,35 +1,33 @@
 import torch
 
-from gaussian_splats.blender import Scene, linear_to_srgb
 from gaussian_splats.splats.splats import GaussianSplat
 from gaussian_splats.splats.utils import rgb_to_sh
 
-from .backend import RayQueryBackend
+from .blender import linear_to_srgb
+from .renderers.types import RayBackend
+from .scene import Scene
 
 
 def query_scene(
     scene: Scene,
     splats: GaussianSplat,
-    backend: RayQueryBackend,
+    backend: RayBackend,
     triangle_id: torch.Tensor,
     barycentric: torch.Tensor,
-    eps: float = 1e-4,
 ) -> tuple[GaussianSplat, GaussianSplat]:
-    positions = splats.mean
-    normals = splats.normals
-    extent = torch.linalg.vector_norm(positions.amax(dim=0) - positions.amin(dim=0))
-    eps = max(float(eps), float(extent) * 1e-7)
+    origins = splats.mean
+    directions = splats.normals
 
-    colors, alphas, hits = backend.query(
+    rgba, valid = backend.query(
         scene,
-        positions,
-        normals,
-        triangle_id=triangle_id,
+        origins,
+        directions,
+        triangle_ids=triangle_id,
         barycentric=barycentric,
     )
 
-    distance = torch.norm(hits - positions, dim=1)
-    valid = torch.isfinite(alphas) & torch.isfinite(hits).all(1) & (distance <= eps * 2)
+    colors, alphas = rgba[:, :3], rgba[:, 3]
+    valid = valid & torch.isfinite(rgba).all(1)
     invalid = ~valid
 
     display_color = linear_to_srgb(colors[valid])

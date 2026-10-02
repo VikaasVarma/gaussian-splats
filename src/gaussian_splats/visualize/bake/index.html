@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scene Renderer</title>
+    <link rel="stylesheet" href="/shared/styles.css" />
+  </head>
+  <body data-endpoint="/bake">
+    <details id="settings" class="panel">
+      <summary>Scene Renderer</summary>
+      <form>
+        <label>Scene <input id="scene" type="file" accept=".gltf,.glb" /></label>
+        <label>Renderer <select id="renderer" name="renderer"></select></label>
+        <div id="renderer-settings"></div>
+        <button id="clear" type="button">Clear scene</button>
+        <div id="status">Choose a glTF or GLB scene</div>
+      </form>
+    </details>
+    <script type="module" src="page.js"></script>
+  </body>
+</html>

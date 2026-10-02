@@ -3,8 +3,9 @@ import math
 import torch
 import torch.nn.functional as F
 
-from gaussian_splats.blender.api import Scene
 from gaussian_splats.splats.splats import GaussianSplat
+
+from .scene import Scene
 
 PHI = (1 + 5**0.5) / 2
 PI = math.pi

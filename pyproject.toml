@@ -23,6 +23,7 @@ dependencies = [
 
 [project.scripts]
 visualize = "gaussian_splats.visualize.server:main"
+convert = "gaussian_splats.splats.convert:app"
 
 [dependency-groups]
 dev = [
