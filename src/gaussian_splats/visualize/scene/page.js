@@ -22,6 +22,7 @@ function showRendererSettings() {
     input.type = "number";
     input.value = setting.value;
     input.min = setting.min;
+    if (setting.max !== undefined) input.max = setting.max;
     input.step = setting.step;
     label.append(input);
     rendererSettings.append(label);

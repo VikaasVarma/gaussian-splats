@@ -15,7 +15,19 @@ from gaussian_splats.visualize.camera import CameraController
 from gaussian_splats.visualize.server import Page, upload
 
 RENDERERS = (
-    {"value": "cycles", "label": "Cycles"},
+    {
+        "value": "cycles",
+        "label": "Cycles",
+        "settings": (
+            {
+                "name": "samples",
+                "label": "Samples",
+                "value": 1,
+                "min": 1,
+                "step": 1,
+            },
+        ),
+    },
     {"value": "eevee", "label": "Eevee"},
     {"value": "workbench", "label": "Workbench (Blender)"},
     {
@@ -68,7 +80,22 @@ RENDERERS = (
 )
 
 RAY_RENDERERS = tuple(
-    renderer
+    {
+        **renderer,
+        "settings": renderer.get("settings", ())
+        + (
+            {
+                "name": "ray_batch_size",
+                "label": "Ray Batch Size",
+                "value": 4096,
+                "min": 1,
+                "max": 4096,
+                "step": 1,
+            },
+        ),
+    }
+    if renderer["value"] == "cycles"
+    else renderer
     for renderer in RENDERERS
     if renderer["value"] in {"cycles", "torch-workbench", "phong"}
 )
@@ -94,7 +121,13 @@ class SceneViewer:
         camera = self.controller.camera
         match renderer:
             case "cycles" | "eevee" | "workbench":
-                image = self.session.render(camera, width, height, renderer=renderer)
+                image = self.session.render(
+                    camera,
+                    width,
+                    height,
+                    renderer=renderer,
+                    samples=int(settings.get("samples", 1)),
+                )
             case "torch-workbench":
                 image = WorkbenchBackend(
                     ambient_strength=float(settings.get("ambient_strength", 0.05)),

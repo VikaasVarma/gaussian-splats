@@ -24,6 +24,7 @@ function showRendererSettings() {
     input.type = "number";
     input.value = setting.value;
     input.min = setting.min;
+    if (setting.max !== undefined) input.max = setting.max;
     input.step = setting.step;
     label.append(input);
     rendererSettings.append(label);
@@ -63,7 +64,10 @@ bake.onclick = async () => {
   try {
     const result = await (await post(`${endpoint}/bake`, {
       n_splats: Number(form.elements.num_splats.value),
+      sigma: Number(form.elements.sigma.value),
       renderer: form.elements.renderer.value,
+      samples: form.elements.samples?.value,
+      ray_batch_size: form.elements.ray_batch_size?.value,
       ambient_strength: form.elements.ambient_strength?.value,
       diffuse_strength: form.elements.diffuse_strength?.value,
       specular_strength: form.elements.specular_strength?.value,

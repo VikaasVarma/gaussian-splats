@@ -33,7 +33,11 @@ class BakeViewer:
         renderer = settings.get("renderer", "torch-workbench")
         match renderer:
             case "cycles":
-                return CyclesBackend(self.scene.session)
+                return CyclesBackend(
+                    self.scene.session,
+                    samples=int(settings.get("samples", 1)),
+                    batch_size=int(settings.get("ray_batch_size", 4096)),
+                )
             case "torch-workbench":
                 return WorkbenchBackend(
                     ambient_strength=float(settings.get("ambient_strength", 0.05)),
@@ -72,7 +76,11 @@ class BakeViewer:
         scene = self.scene.scene
         if scene is None:
             raise ValueError("Load a scene before baking")
-        sampled, triangle_id, barycentric = sample_splats(scene, n_splats=n_splats)
+        sampled, triangle_id, barycentric = sample_splats(
+            scene,
+            n_splats=n_splats,
+            sigma=float(settings.get("sigma", 0.65)),
+        )
         baked, _ = query_scene(
             scene, sampled, self.backend(settings), triangle_id, barycentric
         )
