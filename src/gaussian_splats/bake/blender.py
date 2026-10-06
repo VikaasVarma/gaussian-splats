@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from PIL import Image
+from tqdm.auto import tqdm
 
 from gaussian_splats.splats.camera import PinholeCamera
 
@@ -22,11 +23,15 @@ RENDERERS = CAMERA_RENDERERS
 def fit_camera(scene: Scene) -> PinholeCamera:
     points = scene.vertices.reshape(-1, 3)
     rotation = torch.tensor(
-        [math.cos(math.pi / 8), -math.sin(math.pi / 8), 0.0, 0.0],
+        [math.cos(math.pi / 4), -math.sin(math.pi / 4), 0.0, 0.0],
         dtype=points.dtype,
         device=points.device,
     )
-    return PinholeCamera(rotation=rotation).fit_to_points(points)
+    camera = PinholeCamera(rotation=rotation).fit_to_points(points)
+    position = camera.position.clone()
+    position[2] = 0.5 * (points[:, 2].amax() + points[:, 2].amin())
+    camera.translation.copy_(-(camera.rotation_matrix @ position))
+    return camera
 
 
 class BlenderSession:
@@ -100,8 +105,11 @@ class BlenderSession:
     def __exit__(self, exception_type, exception, traceback) -> None:
         if self._process is not None:
             if self._process.poll() is None and self._process.stdin is not None:
-                self._process.stdin.write(json.dumps({"command": "close"}) + "\n")
-                self._process.stdin.flush()
+                try:
+                    self._process.stdin.write(json.dumps({"command": "close"}) + "\n")
+                    self._process.stdin.flush()
+                except BrokenPipeError:
+                    pass  # Preserve the worker's original failure, if any.
             try:
                 self._process.wait(timeout=10)
             except subprocess.TimeoutExpired:
@@ -125,7 +133,12 @@ class BlenderSession:
             np.savez(input_path, **arrays)
             command = {**command, "input": str(input_path)}
         self._send({**command, "output": str(output_path)})
-        output = self._read_until(marker)
+        if command["command"] == "query":
+            batches = math.ceil(len(arrays["origins"]) / command["batch_size"])
+            with tqdm(total=batches, desc="Cycles queries", unit="batch") as progress:
+                output = self._read_until(marker, progress)
+        else:
+            output = self._read_until(marker)
         if output is not None:
             raise RuntimeError(f"Blender request failed:\n{output}")
         return output_path
@@ -143,17 +156,68 @@ class BlenderSession:
         self._process.stdin.write(json.dumps(request) + "\n")
         self._process.stdin.flush()
 
-    def _read_until(self, marker: str) -> str | None:
+    def _read_until(self, marker: str, progress=None) -> str | None:
         if self._process is None or self._process.stdout is None:
             raise RuntimeError("BlenderSession is not running")
         logs = []
         for line in self._process.stdout:
+            if line.startswith("CYCLES_DEVICE") or (progress is not None and progress.n == 0):
+                tqdm.write(line.rstrip())
+            if line.startswith("QUERY_BATCH_DONE") and progress is not None:
+                progress.update(1)
+                continue
             if line.startswith(marker):
                 return None
             logs.append(line)
             if self._process.poll() is not None:
                 break
         return "".join(logs)
+
+    def render_reference(
+        self,
+        camera: PinholeCamera,
+        destination: str | Path,
+        *,
+        samples: int = 4096,
+        seed: int = 0,
+        exposure: float = 4.0,
+        near: float = 1e-4,
+        far: float = 100.0,
+        device: str = "CPU",
+    ) -> Path:
+        """Persist EXR, 16-bit display PNG, and float/mask bundle outside session tempdir."""
+        if samples < 1 or seed < 0:
+            raise ValueError("Samples must be positive and seed nonnegative")
+        width, height = camera.image_size
+        if camera.principal_point != (width / 2, height / 2):
+            raise ValueError("Reference camera currently requires centered principal point")
+        if abs(camera.focal_length[0] - camera.focal_length[1]) > 1e-6:
+            raise ValueError("Reference camera currently requires square pixels")
+        output = self.request(
+            {
+                "command": "render",
+                "reference_bundle": True,
+                "renderer": "cycles",
+                "samples": samples,
+                "seed": seed,
+                "exposure": exposure,
+                "device": device,
+                "width": width,
+                "height": height,
+                "near": near,
+                "far": far,
+                "position": camera.position.tolist(),
+                "rotation": camera.rotation_matrix.tolist(),
+                "focal_length": list(camera.focal_length),
+            },
+            output_suffix=".npz",
+            marker="RENDER_RESULT",
+        )
+        destination = Path(destination).with_suffix(".npz")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        for suffix in (".npz", ".exr", ".png"):
+            shutil.copy2(output.with_suffix(suffix), destination.with_suffix(suffix))
+        return destination
 
     def render(
         self,
@@ -162,12 +226,14 @@ class BlenderSession:
         height: int,
         renderer: str = "cycles",
         samples: int = 1,
+        exposure: float = 0.0,
     ) -> torch.Tensor:
         output = self.request(
             {
                 "command": "render",
                 "renderer": renderer,
                 "samples": samples,
+                "exposure": exposure,
                 "width": width,
                 "height": height,
                 "position": camera.position.tolist(),

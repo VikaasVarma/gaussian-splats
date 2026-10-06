@@ -17,11 +17,15 @@ class CyclesBackend(RayBackend, RenderBackend):
         samples: int = 1,
         batch_size: int = 4096,
         eps: float = 1e-4,
+        exposure: float = 0.0,
+        device: str = "CPU",
     ) -> None:
         self.session = session
         self.samples = samples
         self.batch_size = batch_size
         self.eps = eps
+        self.exposure = exposure
+        self.device = device
 
     def query(
         self,
@@ -43,6 +47,7 @@ class CyclesBackend(RayBackend, RenderBackend):
                 "command": "query",
                 "samples": self.samples,
                 "batch_size": self.batch_size,
+                "device": self.device,
             },
             {
                 "origins": ray_origins,
@@ -56,6 +61,7 @@ class CyclesBackend(RayBackend, RenderBackend):
             lambda key: torch.as_tensor(result[key], device=device, dtype=dtype),
             ["colors", "alphas", "hits"],
         )
+        colors = colors * 2**self.exposure
 
         valid = torch.isfinite(hits).all(1) & (
             torch.linalg.vector_norm(hits - origins, dim=1) <= self.eps * 2
@@ -70,4 +76,11 @@ class CyclesBackend(RayBackend, RenderBackend):
         height: int,
         **kwargs: object,
     ) -> torch.Tensor:
-        return self.session.render(camera, width, height, renderer="cycles", samples=self.samples)
+        return self.session.render(
+            camera,
+            width,
+            height,
+            renderer="cycles",
+            samples=self.samples,
+            exposure=float(kwargs.get("exposure", 0.0)),
+        )

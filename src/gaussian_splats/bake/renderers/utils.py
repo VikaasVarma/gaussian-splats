@@ -104,7 +104,7 @@ def intersection_from_point(
     determinant = determinant.gather(1, index).view(N)
     u = u.gather(1, index).view(N)
     v = v.gather(1, index).view(N)
-    uv = torch.stack((u, v), dim=-1) / determinant.view(N, 1)
+    uv = torch.stack((u, v), dim=-1)
     uv = torch.where(hit[:, None], uv, 0)
 
     return hit, distance, torch.where(hit, triangle, -1), uv

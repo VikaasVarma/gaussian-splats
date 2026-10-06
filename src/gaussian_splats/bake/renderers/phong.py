@@ -5,6 +5,7 @@ import torch.nn.functional as F
 
 from gaussian_splats.splats.camera import PinholeCamera
 
+from ..blender import linear_to_srgb
 from ..scene import Scene
 from .types import RayBackend, RenderBackend
 from .utils import generate_pinhole_rays, intersection_from_point, light_rays, occluded
@@ -110,9 +111,9 @@ class PhongBackend(RayBackend, RenderBackend):
         color, _ = self.query(
             scene,
             positions,
-            directions[hit],
+            -directions[hit],
             triangle_ids[hit],
             barycentric[hit],
         )
         image[hit] = color[:, :3]
-        return image.view(height, width, 3)
+        return linear_to_srgb(image.view(height, width, 3)).clamp(0, 1)

@@ -68,6 +68,7 @@ bake.onclick = async () => {
       renderer: form.elements.renderer.value,
       samples: form.elements.samples?.value,
       ray_batch_size: form.elements.ray_batch_size?.value,
+      exposure: form.elements.exposure?.value,
       ambient_strength: form.elements.ambient_strength?.value,
       diffuse_strength: form.elements.diffuse_strength?.value,
       specular_strength: form.elements.specular_strength?.value,

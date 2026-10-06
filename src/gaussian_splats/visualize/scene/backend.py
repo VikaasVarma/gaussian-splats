@@ -26,6 +26,14 @@ RENDERERS = (
                 "min": 1,
                 "step": 1,
             },
+            {
+                "name": "exposure",
+                "label": "Exposure",
+                "value": 4.0,
+                "min": -10.0,
+                "max": 10.0,
+                "step": 0.1,
+            },
         ),
     },
     {"value": "eevee", "label": "Eevee"},
@@ -127,6 +135,7 @@ class SceneViewer:
                     height,
                     renderer=renderer,
                     samples=int(settings.get("samples", 1)),
+                    exposure=float(settings.get("exposure", 0.0)),
                 )
             case "torch-workbench":
                 image = WorkbenchBackend(

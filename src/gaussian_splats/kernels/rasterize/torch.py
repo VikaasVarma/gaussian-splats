@@ -23,6 +23,7 @@ def project(
     splats: GaussianSplat,
     camera: Camera,
     indices: torch.Tensor | None = None,
+    covariance_epsilon: float = 0.3,
 ) -> ProjectedGaussianSplat:
     (mean, rotation, scale, opacity, color, normals) = (
         splats.mean,
@@ -43,11 +44,12 @@ def project(
     # Project Gaussian means and covariances.
     mean_world = mean
     mean, covariance = camera.project_gaussian(
-        mean, quaternion_to_rotation_matrix(F.normalize(rotation, dim=-1)), scale.exp()
+        mean, quaternion_to_rotation_matrix(F.normalize(rotation, dim=-1)), scale.exp(),
+        covariance_epsilon=covariance_epsilon,
     )
 
     # Evaluate spherical harmonics and compute opacity.
-    direction = F.normalize(mean_world - camera.position, dim=-1)
+    direction = F.normalize(camera.position - mean_world, dim=-1)
     color = evaluate_sh(color, direction)
     opacity = opacity.sigmoid()
     normals = normals @ camera.rotation_matrix.T
@@ -203,8 +205,9 @@ def render(
 
     # Accumulate transmittance and color contributions.
     log_survival = torch.log1p(-alpha)
-    transmittance = log_survival.cumsum(0) - log_survival
+    transmittance = log_survival.cumsum(0, dtype=torch.float64) - log_survival
     transmittance = torch.exp(transmittance - transmittance[ranges[tile_ids, 0]])
+    transmittance = transmittance.to(alpha.dtype)
 
     weights = transmittance * alpha * ((1 - transmittance) < opacity_threshold)
     contributions = weights[..., None] * color[indices, None]
@@ -225,13 +228,14 @@ def rasterize(
     camera: Camera,
     tile_size: int = 8,
     opacity_threshold: float = 0.999,
-    near: float = 0.1,
+    near: float = 1e-4,
     far: float = 100.0,
     rendering_mode: Literal["gaussian", "ellipsoid"] = "gaussian",
     confidence: float = 0.95,
     indices: torch.Tensor | None = None,
+    covariance_epsilon: float = 0.3,
 ) -> torch.Tensor:
-    projected = project(splats, camera, indices)
+    projected = project(splats, camera, indices, covariance_epsilon=covariance_epsilon)
     projected = cull(projected, near, far)
     assignment = tile(projected, camera, tile_size, rendering_mode, confidence)
     image = render(

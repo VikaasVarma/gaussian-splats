@@ -70,14 +70,15 @@ def render_pass(pixels: np.ndarray, names: list[str], components: str) -> np.nda
 def make_camera(shader: Path):
     camera = bpy.data.objects.get("RayTableCamera")
     if camera is None:
-        camera_data = bpy.data.cameras.new("RayTableCamera")
-        camera = bpy.data.objects.new("RayTableCamera", camera_data)
+        camera = bpy.data.objects.new("RayTableCamera", bpy.data.cameras.new("RayTableCamera"))
         bpy.context.scene.collection.objects.link(camera)
         camera.matrix_world = Matrix.Identity(4)
-        camera.data.type = "CUSTOM"
-        camera.data.custom_mode = "EXTERNAL"
-        camera.data.clip_start = 1e-6
-        camera.data.clip_end = 1e6
+    else:
+        camera.data = bpy.data.cameras.new("RayTableCamera")
+    camera.data.type = "CUSTOM"
+    camera.data.custom_mode = "EXTERNAL"
+    camera.data.clip_start = 1e-6
+    camera.data.clip_end = 1e6
     camera.data.custom_filepath = str(shader)
     with bpy.context.temp_override(object=camera, active_object=camera):
         bpy.ops.object.camera_custom_update()
@@ -86,7 +87,7 @@ def make_camera(shader: Path):
 
 def configure_cycles(scene, samples: int) -> None:
     scene.render.engine = "CYCLES"
-    scene.cycles.shading_system = True
+    scene.cycles.shading_system = False  # The custom camera enables OSL independently.
     scene.cycles.samples = samples
     scene.cycles.use_adaptive_sampling = False
     scene.cycles.use_denoising = False
@@ -96,6 +97,7 @@ def configure_cycles(scene, samples: int) -> None:
     scene.cycles.sample_clamp_indirect = 0.0
     scene.render.resolution_percentage = 100
     scene.render.film_transparent = True
+    scene.view_settings.exposure = 0.0
     scene.view_settings.view_transform = "Standard"
     scene.view_settings.look = "None"
     scene.view_layers[0].use_pass_combined = True
@@ -118,6 +120,7 @@ def configure_camera(scene, renderer: str, samples: int) -> None:
     scene.render.resolution_percentage = 100
     scene.render.film_transparent = False
     scene.render.use_persistent_data = True
+    scene.render.image_settings.media_type = "IMAGE"
     scene.render.image_settings.file_format = "PNG"
 
 
@@ -308,10 +311,78 @@ def render_camera(scene, request: dict[str, object]) -> None:
     camera.location = request["position"]
     scene.camera = camera
     configure_camera(scene, str(request.get("renderer", "cycles")), int(request["samples"]))
+    scene.view_settings.exposure = float(request.get("exposure", 0.0))
     scene.render.resolution_x, scene.render.resolution_y = width, height
     scene.render.resolution_percentage = 100
     scene.render.filepath = str(request["output"])
+    camera.data.clip_start = float(request.get("near", 1e-4))
+    camera.data.clip_end = float(request.get("far", 100.0))
+    if request.get("reference_bundle"):
+        render_reference_bundle(scene, request)
+        return
     bpy.ops.render.render(write_still=True)
+
+
+def render_reference_bundle(scene, request):
+    """Seeded full-float Cycles reference with geometry-derived foreground."""
+    if request.get("renderer") != "cycles":
+        raise ValueError("Reference bundles require Cycles")
+    output = Path(request["output"])
+    scene.use_nodes = False
+    scene.cycles.shading_system = False  # Standard camera rendering does not require OSL.
+    device = str(request.get("device", "CPU"))
+    if device != "CPU":
+        preferences = bpy.context.preferences.addons["cycles"].preferences
+        preferences.compute_device_type = device
+        preferences.get_devices()
+        selected = [d for d in preferences.devices if d.type == device]
+        if not selected:
+            raise RuntimeError(f"No Cycles {device} device available")
+        for d in preferences.devices:
+            d.use = d in selected
+        scene.cycles.device = "GPU"
+    else:
+        scene.cycles.device = "CPU"
+    scene.cycles.seed = int(request["seed"])
+    scene.cycles.use_animated_seed = False
+    scene.view_layers[0].use_pass_z = True
+    scene.render.image_settings.media_type = "MULTI_LAYER_IMAGE"
+    scene.render.image_settings.use_exr_interleave = True
+    scene.render.image_settings.color_depth = "32"
+    scene.render.filepath = str(output.with_suffix(".exr"))
+    bpy.ops.render.render(write_still=True)
+    pixels, names = read_exr(Path(scene.render.filepath))
+    combined_names = [n for n in names if ".Combined." in n]
+    combined = pixels[..., [names.index(n) for n in combined_names]]
+    linear = render_pass(combined, combined_names, "RGB")
+    depth_names = [n for n in names if ".Depth." in n]
+    if len(depth_names) != 1:
+        raise RuntimeError(f"Expected one depth channel; got {depth_names}")
+    depth = pixels[..., names.index(depth_names[0])]
+    foreground = np.isfinite(depth) & (depth > 0) & (depth < scene.camera.data.clip_end)
+    # Save color-managed 16-bit display RGB without a second transport render.
+    scene.render.image_settings.media_type = "IMAGE"
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGB"
+    scene.render.image_settings.color_depth = "16"
+    png = output.with_suffix(".png")
+    bpy.data.images["Render Result"].save_render(str(png), scene=scene)
+    image = oiio.ImageInput.open(str(png))
+    display = image.read_image("float")[..., :3]
+    image.close()
+    metadata = {
+        "blender_version": bpy.app.version_string,
+        "device": device,
+        "seed": scene.cycles.seed, "samples": scene.cycles.samples,
+        "adaptive_sampling": False, "denoising": False,
+        "view_transform": scene.view_settings.view_transform,
+        "look": scene.view_settings.look, "exposure": scene.view_settings.exposure,
+        "display_device": scene.display_settings.display_device,
+        "Q_camera": scene.render.resolution_x * scene.render.resolution_y * scene.cycles.samples,
+        "Q_segments": None, "mask_source": "Cycles Depth pass (opaque geometry)",
+    }
+    np.savez(output, linear_rgb=linear, display_rgb=display, foreground=foreground,
+             depth=depth, metadata=json.dumps(metadata))
 
 
 def setup_compositor(scene):
@@ -331,8 +402,24 @@ def setup_compositor(scene):
     return combined, position
 
 
-def query(scene, origins, directions, footprints, workdir, request, samples, batch_size):
+def query(scene, origins, directions, footprints, workdir, request, samples, batch_size, device):
     configure_cycles(scene, samples)
+    if device == "OPTIX":
+        preferences = bpy.context.preferences.addons["cycles"].preferences
+        preferences.compute_device_type = "OPTIX"
+        preferences.get_devices()
+        selected = [d for d in preferences.devices if d.type == "OPTIX"]
+        if not selected:
+            raise RuntimeError("No OptiX GPU available")
+        for d in preferences.devices:
+            d.use = d in selected
+        scene.cycles.device = "GPU"
+        print(f"CYCLES_DEVICE OPTIX: {[d.name for d in selected]} (CPU disabled)", flush=True)
+    elif device == "CPU":
+        scene.cycles.device = "CPU"
+        print("CYCLES_DEVICE CPU", flush=True)
+    else:
+        raise ValueError(f"Unsupported Cycles query device: {device}")
     colors = np.zeros((len(origins), 3), dtype=np.float32)
     alphas = np.zeros(len(origins), dtype=np.float32)
     hits = np.zeros((len(origins), 3), dtype=np.float32)
@@ -370,12 +457,13 @@ def query(scene, origins, directions, footprints, workdir, request, samples, bat
         bpy.ops.render.render()
         combined_path = next(workdir.glob(f"{stem}.combined*.exr"))
         position_path = next(workdir.glob(f"{stem}.position*.exr"))
-        combined, _ = read_exr(combined_path)
+        combined, combined_names = read_exr(combined_path)
         position, _ = read_exr(position_path)
-        combined = render_pass(combined, list(_), "RGBA").reshape(-1, 4)[:width]
+        combined = render_pass(combined, combined_names, "RGBA").reshape(-1, 4)[:width]
         position = position[..., :3].reshape(-1, 3)[:width]
         colors[start:stop], alphas[start:stop] = combined[:, :3], combined[:, 3]
         hits[start:stop] = position
+        print("QUERY_BATCH_DONE", flush=True)
     np.savez(workdir / f"{request}.result.npz", colors=colors, alphas=alphas, hits=hits)
 
 
@@ -407,6 +495,7 @@ def main() -> None:
                 output_path.name.removesuffix(".result.npz"),
                 int(request["samples"]),
                 int(request["batch_size"]),
+                request["device"],
             )
             print(f"RESULT {output_path}", flush=True)
         elif request["command"] == "render":

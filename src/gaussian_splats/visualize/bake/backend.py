@@ -37,6 +37,7 @@ class BakeViewer:
                     self.scene.session,
                     samples=int(settings.get("samples", 1)),
                     batch_size=int(settings.get("ray_batch_size", 4096)),
+                    exposure=float(settings.get("exposure", 4.0)),
                 )
             case "torch-workbench":
                 return WorkbenchBackend(
@@ -58,7 +59,13 @@ class BakeViewer:
         camera = self.controller.camera
         available = max(2, width - 1)
         left_width, right_width = available // 2, available - available // 2
-        left = self.backend(settings).render(self.scene.scene, camera, left_width, height)
+        left = self.backend(settings).render(
+            self.scene.scene,
+            camera,
+            left_width,
+            height,
+            exposure=float(settings.get("exposure", 4.0)),
+        )
         if self.splats is None:
             right = Frame(
                 left.new_zeros((height, right_width, 3)), metadata={"X-Total-Splats": "0"}

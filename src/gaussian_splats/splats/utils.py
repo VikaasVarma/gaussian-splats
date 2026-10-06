@@ -57,19 +57,25 @@ def rgb_to_sh(rgb: torch.Tensor) -> torch.Tensor:
     return (rgb - 0.5) / SH_C0
 
 
-def evaluate_sh(coefficients: torch.Tensor, directions: torch.Tensor) -> torch.Tensor:
-    """Evaluate degree 0-3 real spherical harmonics into RGB."""
+def spherical_harmonics(
+    directions: torch.Tensor,  # N x 3
+    num_coefficients: int,
+) -> torch.Tensor:
+    """Evaluate real spherical-harmonic basis functions through degree 6."""
+    degree = int(num_coefficients**0.5) - 1
+    if (degree + 1) ** 2 != num_coefficients or degree > 6:
+        raise ValueError(f"Unsupported spherical-harmonic coefficient count: {num_coefficients}")
+
     x, y, z = directions.unbind(dim=-1)
     xx, yy, zz = x.square(), y.square(), z.square()
     xy, yz, xz = x * y, y * z, x * z
 
-    degree = coefficients.shape[1]
-    basis = directions.new_empty((len(directions), degree))
+    basis = directions.new_empty((len(directions), num_coefficients))
     basis[:, 0] = SH_C0
 
-    if degree > 1:
+    if num_coefficients > 1:
         basis[:, 1:4] = torch.stack((-SH_C1 * y, SH_C1 * z, -SH_C1 * x), dim=-1)
-    if degree > 4:
+    if num_coefficients > 4:
         basis[:, 4:9] = torch.stack(
             (
                 SH_C2[0] * xy,
@@ -80,7 +86,7 @@ def evaluate_sh(coefficients: torch.Tensor, directions: torch.Tensor) -> torch.T
             ),
             dim=-1,
         )
-    if degree > 9:
+    if num_coefficients > 9:
         basis[:, 9:16] = torch.stack(
             (
                 SH_C3[0] * y * (3 * xx - yy),
@@ -93,7 +99,7 @@ def evaluate_sh(coefficients: torch.Tensor, directions: torch.Tensor) -> torch.T
             ),
             dim=-1,
         )
-    if degree > 16:
+    if num_coefficients > 16:
         basis[:, 16:25] = torch.stack(
             (
                 SH_C4[0] * xy * (xx - yy),
@@ -108,9 +114,51 @@ def evaluate_sh(coefficients: torch.Tensor, directions: torch.Tensor) -> torch.T
             ),
             dim=-1,
         )
-    if degree > 25:
-        raise NotImplementedError(f"SH degree {int(degree**0.5) - 1} > 4 is not implemented")
+    if num_coefficients > 25:
+        basis[:, 25:36] = torch.stack(
+            (
+                z * (63 * zz.square() - 70 * zz + 15),
+                x * (63 * zz.square() - 42 * zz + 3),
+                y * (63 * zz.square() - 42 * zz + 3),
+                (xx - yy) * (9 * zz - 1),
+                2 * xy * (9 * zz - 1),
+                z * x * (xx - 3 * yy),
+                z * y * (3 * xx - yy),
+                xx.square() - 6 * xx * yy + yy.square(),
+                4 * xy * (xx - yy),
+                x * (xx.square() - 10 * xx * yy + 5 * yy.square()),
+                y * (5 * xx.square() - 10 * xx * yy + yy.square()),
+            ),
+            dim=-1,
+        )
+    if num_coefficients > 36:
+        basis[:, 36:49] = torch.stack(
+            (
+                231 * zz.pow(3) - 315 * zz.square() + 105 * zz - 5,
+                x * z * (231 * zz.square() - 210 * zz + 35),
+                y * z * (231 * zz.square() - 210 * zz + 35),
+                (xx - yy) * (33 * zz.square() - 18 * zz + 1),
+                2 * xy * (33 * zz.square() - 18 * zz + 1),
+                x * (xx - 3 * yy) * (11 * zz - 1),
+                y * (3 * xx - yy) * (11 * zz - 1),
+                (xx.square() - 6 * xx * yy + yy.square()) * (11 * zz - 1),
+                4 * xy * (xx - yy) * (11 * zz - 1),
+                z * x * (xx.square() - 10 * xx * yy + 5 * yy.square()),
+                z * y * (5 * xx.square() - 10 * xx * yy + yy.square()),
+                x.pow(6) - 15 * x.pow(4) * yy + 15 * xx * yy.square() - yy.pow(3),
+                2 * xy * (3 * x.pow(4) - 10 * xx * yy + 3 * yy.square()),
+            ),
+            dim=-1,
+        )
+    return basis
 
+
+def evaluate_sh(
+    coefficients: torch.Tensor,  # N x (degree + 1)^2 x 3 (RGB)
+    directions: torch.Tensor,  # N x 3
+) -> torch.Tensor:
+    """Evaluate spherical-harmonic RGB coefficients."""
+    basis = spherical_harmonics(directions, coefficients.shape[1])
     return ((basis.unsqueeze(1) @ coefficients).squeeze(1) + 0.5).clamp_min(0)
 
 

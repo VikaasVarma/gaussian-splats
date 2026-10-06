@@ -19,7 +19,12 @@ class Camera(ABC):
 
     @abstractmethod
     def project_gaussian(
-        self, mean: torch.Tensor, rotation: torch.Tensor, scale: torch.Tensor
+        self,
+        mean: torch.Tensor,
+        rotation: torch.Tensor,
+        scale: torch.Tensor,
+        # ,
+        **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
     @abstractmethod
@@ -78,6 +83,7 @@ class PinholeCamera(Camera):
         mean: torch.Tensor,  # N x 3
         rotation: torch.Tensor,  # N x 3 x 3
         scale: torch.Tensor,  # N x 3
+        covariance_epsilon: float = 0.3,
     ) -> tuple[
         torch.Tensor,  # Projected Means: N x 3
         torch.Tensor,  # 2D covariance: N x 2 x 2
@@ -114,7 +120,7 @@ class PinholeCamera(Camera):
 
         covariance_factor = jacobian @ camera_rotation @ rotation * scale[:, None]
         covariance = covariance_factor @ covariance_factor.mT
-        covariance.diagonal(dim1=-2, dim2=-1).add_(0.3)  # Inverse covariance stability
+        covariance.diagonal(dim1=-2, dim2=-1).add_(covariance_epsilon)  # Inv cov stability
         return mean, covariance
 
     @torch.no_grad()

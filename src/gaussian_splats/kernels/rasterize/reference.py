@@ -31,6 +31,7 @@ def project_gaussians(
     cy,
     image_width,
     image_height,
+    covariance_epsilon=0.3,
 ):
     # Project Gaussian means and covariances.
     mean_world = mean
@@ -63,11 +64,11 @@ def project_gaussians(
         * scale.exp()[:, None]
     )
     covariance = covariance_factor @ covariance_factor.mT
-    covariance.diagonal(dim1=-2, dim2=-1).add_(0.3)
+    covariance.diagonal(dim1=-2, dim2=-1).add_(covariance_epsilon)
 
     # Evaluate spherical harmonics and compute opacity.
     camera_position = -(camera_rotation.T @ camera_translation)
-    direction = F.normalize(mean_world - camera_position, dim=-1)
+    direction = F.normalize(camera_position - mean_world, dim=-1)
     color = evaluate_sh(color, direction)
     opacity = opacity.sigmoid()
     inverse_covariance = torch.linalg.inv(covariance)
@@ -93,6 +94,7 @@ def project_and_count(
     far,
     rendering_mode,
     confidence,
+    covariance_epsilon=0.3,
 ):
     assert tile_size > 0 and tile_size & (tile_size - 1) == 0
     assert image_width % tile_size == 0 and image_height % tile_size == 0
@@ -110,6 +112,7 @@ def project_and_count(
         cy,
         image_width,
         image_height,
+        covariance_epsilon=covariance_epsilon,
     )
     W, H = image_width, image_height
     Ht, Wt = H // tile_size, W // tile_size

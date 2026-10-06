@@ -12,7 +12,6 @@ PI = math.pi
 
 
 def count_samples_per_triangle(scene: Scene, n_splats: int) -> torch.Tensor:
-    # Counts samples per triangle
     surface_area = scene.surface_areas.sum()
     raw_counts = scene.surface_areas / surface_area * n_splats
     counts = raw_counts.floor().int()
@@ -80,6 +79,8 @@ def sample_splats(
 
     x, y, z = normals.unbind(dim=-1)
     rotation = torch.stack((1.0 + z, -y, x, torch.zeros_like(z)), dim=-1)
+    near_neg_z = rotation.norm(dim=-1) < 1e-6  # Fallback case
+    rotation[near_neg_z] = rotation.new_tensor((0.0, 1.0, 0.0, 0.0))
     rotation = F.normalize(rotation, dim=-1)
 
     spacing = extent / resolution if resolution is not None else (surface_area / n_splats) ** 0.5
