@@ -1,38 +1,29 @@
 # Gaussian Splat Render Baking
 
-A ray-traced renderer queries the color arriving along rays shot through a camera to form a complete image.
+A ray-tracer renders a scene by shooting rays from a light source, bouncing them around the scene, and accumulating color until they enter a camera lens.
 
-Instead, using the same renderer, we query the color arriving along rays shot from the surface of a mesh. This information is baked into a standard 3D Gaussian Splat scene and can be viewed from arbitrary angles.
+Instead, we can precompute, for points across the mesh, the color of the final bounce from many different viewing angles. This information is baked into a standard 3D Gaussian Splat scene and can then be viewed from anywhere.
 
 ## Pipeline
 
-1. Sample normal-aligned disk-shaped splats on the mesh surface according to triangle area.
-2. Query radiance per splat from different viewing angles.
-3. Fit opacity and view-dependent SH color.
-4. Optionally smooth and checkpoint
+1. Sample disk-shaped splats on the mesh surface according to triangle area.
+2. For each splat and a set of viewing angles, query the radiance.
+3. Fit splat opacity and view-dependent SH color coefficients.
 
 ## Usage
 
-The below bakes the Cornell box using blender's cycles renderer.
+The below bakes and views the Cornell box using blender's cycles renderer.
 
 ```bash
 uv run python -m gaussian_splats.bake bake cycles \
   --mesh assets/cornell-box/cornell_box_core.glb \
   --output output/cornell.pt \
-  --cycles-device OPTIX --device cuda \
-  --n-splats 262144 --sigma 0.6825 \
-  --samples 32 --view-samples 16 --sh-degree 0 \
-  --exposure 4 --sh-smoothing-percent 10 \
-  --cycles-workers 1
-```
+  --n-splats 262144 --samples 32 --view-samples 16 --sh-degree 0
 
-View the checkpoint:
-
-```bash
 uv run visualize --checkpoint output/cornell.pt
 ```
 
-Open <http://127.0.0.1:7007/gaussian/>. See [viewer](../visualize/README.md) for more options.
+See [viewer](../visualize/README.md) for more options.
 
 ## Examples
 
@@ -45,7 +36,9 @@ Open <http://127.0.0.1:7007/gaussian/>. See [viewer](../visualize/README.md) for
 | Duck | Phong | 131,072 | 0.26 | 0.13 | 0.9852 | 31.44 |
 | Barramundi Fish | Phong | 131,072 | 0.26 | 0.13 | 0.9636 | 36.87 |
 
-*Reference left, splats right. Image stats average four full-frame 512×512 sRGB views.*
+---
+
+The left 2x2 grid is the reference rendered image. The right is the scene baked into splats and then rendered.
 
 ### Cornell box · Cycles
 
