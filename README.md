@@ -1,17 +1,5 @@
 # gaussian-splats
 
-## Visualize a checkpoint
-
-Install the project with `uv`:
-
-```bash
-uv sync
-```
-
-Start the viewer with a checkpoint:
-
-```bash
-uv run visualize --checkpoint path/to/checkpoint.ply
-```
-
-Open <http://127.0.0.1:7007> in a browser. Move with MineCraft controls.
+- [Bake](src/gaussian_splats/bake/README.md) — Convert mesh geometry and appearance into Gaussian splats.
+- [Splats](src/gaussian_splats/splats/README.md) — Load, render and convert checkpoints; tensor and camera conventions; basic benchmarks
+- [Viewer](src/gaussian_splats/visualize/README.md) — Inspect scenes and splats interactively, or add a visualization page.

@@ -21,7 +21,11 @@ def query_scene(
     view_samples: int = 32,
     sh_smoothing_percent: float = 0.0,
 ) -> tuple[GaussianSplat, GaussianSplat]:
-    directions = sample_outgoing_directions(splats.normals, view_samples)
+    # Sample using geometric normals (instead of interpolated normals to avoid backfacing rays)
+    v0, v1, v2 = scene.vertices.unbind(dim=1)
+    normals = F.normalize(torch.linalg.cross(v1 - v0, v2 - v0), dim=-1)
+    directions = sample_outgoing_directions(normals[triangle_id], view_samples)
+
     rgba, valid = backend.query(
         scene,
         splats.mean.repeat_interleave(view_samples, dim=0),
@@ -80,11 +84,11 @@ def sample_outgoing_directions(normals: torch.Tensor, count: int) -> torch.Tenso
         return normals[:, None]
 
     device, dtype = normals.device, normals.dtype
-    index = torch.arange(count, device=device, dtype=dtype)
+    index = torch.arange(count, device=device, dtype=dtype)[:, None]
     z = (index + 0.5) / count
     phi = 2 * math.pi * torch.frac(index / ((1 + 5**0.5) / 2))
+    phi = phi + 2 * math.pi * torch.rand(len(normals), 1, 1, device=device, dtype=dtype)
     radius = torch.sqrt((1 - z.square()).clamp_min(0))
-    local = torch.stack((radius * phi.cos(), radius * phi.sin(), z), dim=-1)
 
     reference = normals.new_tensor((0.0, 0.0, 1.0)).expand_as(normals)
     reference = torch.where(
@@ -93,9 +97,8 @@ def sample_outgoing_directions(normals: torch.Tensor, count: int) -> torch.Tenso
     tangent = F.normalize(torch.linalg.cross(reference, normals), dim=-1)
     bitangent = torch.linalg.cross(normals, tangent)
     return (
-        local[None, :, 0:1] * tangent[:, None]
-        + local[None, :, 1:2] * bitangent[:, None]
-        + local[None, :, 2:3] * normals[:, None]
+        radius * (phi.cos() * tangent[:, None] + phi.sin() * bitangent[:, None])
+        + z * normals[:, None]
     )
 
 

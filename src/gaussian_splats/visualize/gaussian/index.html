@@ -12,6 +12,7 @@
       <form>
         <label>Checkpoint <input id="checkpoint" type="file" accept=".pt" /></label>
         <label>Tile size <input name="tile_size" type="number" required min="1" value="8" /></label>
+        <label>Backend <select name="backend"><option value="torch">PyTorch</option><option value="triton">Triton</option><option value="gsplat">gsplat</option></select></label>
         <label>Opacity threshold <input name="opacity_threshold" type="number" required min="0" max="1" step="0.001" value="0.999" /></label>
         <label>Near plane <input name="near" type="number" required min="0" step="0.1" value="0.1" /></label>
         <label>Far plane <input name="far" type="number" required min="0" step="1" value="100" /></label>

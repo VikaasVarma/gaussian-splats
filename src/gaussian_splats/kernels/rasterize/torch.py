@@ -44,7 +44,9 @@ def project(
     # Project Gaussian means and covariances.
     mean_world = mean
     mean, covariance = camera.project_gaussian(
-        mean, quaternion_to_rotation_matrix(F.normalize(rotation, dim=-1)), scale.exp(),
+        mean,
+        quaternion_to_rotation_matrix(F.normalize(rotation, dim=-1)),
+        scale.exp(),
         covariance_epsilon=covariance_epsilon,
     )
 

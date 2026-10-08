@@ -32,6 +32,35 @@ SH_C4 = (
     0.6258357354491761,
 )
 
+SH_C5 = (
+    -0.6563820568401701,
+    2.0756623148810416,
+    -0.4892382994352504,
+    2.396768392486662,
+    -0.45294665119569694,
+    0.1169503224534236,
+    -0.45294665119569694,
+    2.396768392486662,
+    -0.4892382994352504,
+    2.0756623148810416,
+    -0.6563820568401701,
+)
+SH_C6 = (
+    0.6831841051919143,
+    -2.366619162231752,
+    0.5045649007287242,
+    -0.9212052595149236,
+    0.46060262975746175,
+    -0.5826213625187314,
+    0.06356920226762842,
+    -0.5826213625187314,
+    0.46060262975746175,
+    -0.9212052595149236,
+    0.5045649007287242,
+    -2.366619162231752,
+    0.6831841051919143,
+)
+
 
 def quaternion_to_rotation_matrix(quaternion: torch.Tensor) -> torch.Tensor:
     """Convert a quaternion to a rotation matrix. Assumes normalized quaternions."""
@@ -61,12 +90,49 @@ def spherical_harmonics(
     directions: torch.Tensor,  # N x 3
     num_coefficients: int,
 ) -> torch.Tensor:
-    """Evaluate real spherical-harmonic basis functions through degree 6."""
+    """Evaluate real spherical-harmonic basis functions through degree 8."""
     degree = int(num_coefficients**0.5) - 1
-    if (degree + 1) ** 2 != num_coefficients or degree > 6:
+    if (degree + 1) ** 2 != num_coefficients or degree > 8:
         raise ValueError(f"Unsupported spherical-harmonic coefficient count: {num_coefficients}")
 
     x, y, z = directions.unbind(dim=-1)
+    if degree > 6:
+        # Associated Legendre recurrence in Cartesian form, including at the poles.
+        basis = directions.new_empty((len(directions), num_coefficients))
+        real, imaginary = torch.ones_like(z), torch.zeros_like(z)
+        for order in range(degree + 1):
+            if order:
+                factor = -(2 * order - 1)
+                real, imaginary = (
+                    factor * (x * real - y * imaginary),
+                    factor * (y * real + x * imaginary),
+                )
+            previous = None
+            current = torch.stack((real, imaginary), dim=-1)
+            for band in range(order, degree + 1):
+                if band == order:
+                    value = current
+                elif band == order + 1:
+                    value = (2 * order + 1) * z[:, None] * current
+                else:
+                    value = (
+                        (2 * band - 1) * z[:, None] * current - (band + order - 1) * previous
+                    ) / (band - order)
+                if band > order:
+                    previous, current = current, value
+                scale = math.sqrt(
+                    (2 * band + 1)
+                    / (4 * math.pi)
+                    * math.factorial(band - order)
+                    / math.factorial(band + order)
+                )
+                if order:
+                    basis[:, band * band + band - order] = math.sqrt(2) * scale * value[:, 1]
+                    basis[:, band * band + band + order] = math.sqrt(2) * scale * value[:, 0]
+                else:
+                    basis[:, band * band + band] = scale * value[:, 0]
+        return basis
+
     xx, yy, zz = x.square(), y.square(), z.square()
     xy, yz, xz = x * y, y * z, x * z
 
@@ -114,39 +180,41 @@ def spherical_harmonics(
             ),
             dim=-1,
         )
+    # Normalized real SH, ordered by m = -l, ..., l, as in the lower bands.
+    # Derived from https://dlmf.nist.gov/14.30.E1 and 14.7.E8.
     if num_coefficients > 25:
         basis[:, 25:36] = torch.stack(
             (
-                z * (63 * zz.square() - 70 * zz + 15),
-                x * (63 * zz.square() - 42 * zz + 3),
-                y * (63 * zz.square() - 42 * zz + 3),
-                (xx - yy) * (9 * zz - 1),
-                2 * xy * (9 * zz - 1),
-                z * x * (xx - 3 * yy),
-                z * y * (3 * xx - yy),
-                xx.square() - 6 * xx * yy + yy.square(),
-                4 * xy * (xx - yy),
-                x * (xx.square() - 10 * xx * yy + 5 * yy.square()),
-                y * (5 * xx.square() - 10 * xx * yy + yy.square()),
+                SH_C5[0] * y * (5 * xx.square() - 10 * xx * yy + yy.square()),
+                SH_C5[1] * 4 * xy * z * (xx - yy),
+                SH_C5[2] * y * (3 * xx - yy) * (9 * zz - 1),
+                SH_C5[3] * 2 * xy * z * (3 * zz - 1),
+                SH_C5[4] * y * (21 * zz.square() - 14 * zz + 1),
+                SH_C5[5] * z * (63 * zz.square() - 70 * zz + 15),
+                SH_C5[6] * x * (21 * zz.square() - 14 * zz + 1),
+                SH_C5[7] * (xx - yy) * z * (3 * zz - 1),
+                SH_C5[8] * x * (xx - 3 * yy) * (9 * zz - 1),
+                SH_C5[9] * z * (xx.square() - 6 * xx * yy + yy.square()),
+                SH_C5[10] * x * (xx.square() - 10 * xx * yy + 5 * yy.square()),
             ),
             dim=-1,
         )
     if num_coefficients > 36:
         basis[:, 36:49] = torch.stack(
             (
-                231 * zz.pow(3) - 315 * zz.square() + 105 * zz - 5,
-                x * z * (231 * zz.square() - 210 * zz + 35),
-                y * z * (231 * zz.square() - 210 * zz + 35),
-                (xx - yy) * (33 * zz.square() - 18 * zz + 1),
-                2 * xy * (33 * zz.square() - 18 * zz + 1),
-                x * (xx - 3 * yy) * (11 * zz - 1),
-                y * (3 * xx - yy) * (11 * zz - 1),
-                (xx.square() - 6 * xx * yy + yy.square()) * (11 * zz - 1),
-                4 * xy * (xx - yy) * (11 * zz - 1),
-                z * x * (xx.square() - 10 * xx * yy + 5 * yy.square()),
-                z * y * (5 * xx.square() - 10 * xx * yy + yy.square()),
-                x.pow(6) - 15 * x.pow(4) * yy + 15 * xx * yy.square() - yy.pow(3),
-                2 * xy * (3 * x.pow(4) - 10 * xx * yy + 3 * yy.square()),
+                SH_C6[0] * 2 * xy * (3 * xx.square() - 10 * xx * yy + 3 * yy.square()),
+                SH_C6[1] * z * y * (5 * xx.square() - 10 * xx * yy + yy.square()),
+                SH_C6[2] * 4 * xy * (xx - yy) * (11 * zz - 1),
+                SH_C6[3] * z * y * (3 * xx - yy) * (11 * zz - 3),
+                SH_C6[4] * 2 * xy * (33 * zz.square() - 18 * zz + 1),
+                SH_C6[5] * y * z * (33 * zz.square() - 30 * zz + 5),
+                SH_C6[6] * (231 * zz.pow(3) - 315 * zz.square() + 105 * zz - 5),
+                SH_C6[7] * x * z * (33 * zz.square() - 30 * zz + 5),
+                SH_C6[8] * (xx - yy) * (33 * zz.square() - 18 * zz + 1),
+                SH_C6[9] * z * x * (xx - 3 * yy) * (11 * zz - 3),
+                SH_C6[10] * (xx.square() - 6 * xx * yy + yy.square()) * (11 * zz - 1),
+                SH_C6[11] * z * x * (xx.square() - 10 * xx * yy + 5 * yy.square()),
+                SH_C6[12] * (xx.pow(3) - 15 * xx.square() * yy + 15 * xx * yy.square() - yy.pow(3)),
             ),
             dim=-1,
         )

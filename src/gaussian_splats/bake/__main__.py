@@ -66,12 +66,13 @@ def bake_cycles(
         str, typer.Option("--device", help="PyTorch device for surface sampling.")
     ] = "cpu",
     cycles_samples: Annotated[int, typer.Option("--samples", min=1)] = 1,
-    cycles_device: Annotated[
-        str, typer.Option(help="Cycles backend: CPU or OPTIX.")
-    ] = "CPU",
+    cycles_device: Annotated[str, typer.Option(help="Cycles backend: CPU or OPTIX.")] = "CPU",
+    cycles_workers: Annotated[
+        int, typer.Option(min=1, help="Concurrent Blender processes for Cycles queries.")
+    ] = 1,
     eps: Annotated[float, typer.Option(min=0)] = 1e-4,
     ray_batch_size: Annotated[int, typer.Option(min=1, max=8192)] = 8192,
-    sh_degree: Annotated[int, typer.Option(min=0, max=3)] = 2,
+    sh_degree: Annotated[int, typer.Option(min=0, max=8)] = 4,
     view_samples: Annotated[int, typer.Option(min=1)] = 32,
     sh_smoothing_percent: Annotated[
         float, typer.Option(min=0, max=100, help="Blend SH toward each triangle mean, in percent.")
@@ -79,7 +80,9 @@ def bake_cycles(
     exposure: Annotated[float, typer.Option()] = 4.0,
 ) -> None:
     with BlenderSession(mesh, blender) as session:
-        backend = CyclesBackend(session, cycles_samples, ray_batch_size, eps, exposure, cycles_device)
+        backend = CyclesBackend(
+            session, cycles_samples, ray_batch_size, eps, exposure, cycles_device, cycles_workers
+        )
         _run_bake(
             mesh,
             output,

@@ -27,6 +27,7 @@ def render_gaussians(splats, camera, settings, width, height, rasterizer=rasteri
     camera = replace(camera, image_size=image_size, principal_point=(width / 2, height / 2))
     count = min(max(1, int(settings.get("num_splats") or 10_000)), splats.num_points)
     options = {
+        "backend": settings.get("backend", "torch"),
         "tile_size": tile,
         "opacity_threshold": float(settings.get("opacity_threshold", 0.999)),
         "near": float(settings.get("near", 0.1)),

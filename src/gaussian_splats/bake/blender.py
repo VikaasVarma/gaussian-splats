@@ -127,18 +127,19 @@ class BlenderSession:
         arrays: dict[str, np.ndarray] | None = None,
         output_suffix: str = ".result.npz",
         marker: str = "RESULT",
+        progress=None,
     ) -> Path:
         input_path, output_path = self._request_paths(command["command"], output_suffix)
         if arrays is not None:
             np.savez(input_path, **arrays)
             command = {**command, "input": str(input_path)}
         self._send({**command, "output": str(output_path)})
-        if command["command"] == "query":
+        if command["command"] == "query" and progress is None:
             batches = math.ceil(len(arrays["origins"]) / command["batch_size"])
             with tqdm(total=batches, desc="Cycles queries", unit="batch") as progress:
                 output = self._read_until(marker, progress)
         else:
-            output = self._read_until(marker)
+            output = self._read_until(marker, progress)
         if output is not None:
             raise RuntimeError(f"Blender request failed:\n{output}")
         return output_path
@@ -164,7 +165,8 @@ class BlenderSession:
             if line.startswith("CYCLES_DEVICE") or (progress is not None and progress.n == 0):
                 tqdm.write(line.rstrip())
             if line.startswith("QUERY_BATCH_DONE") and progress is not None:
-                progress.update(1)
+                with progress.get_lock():
+                    progress.update(1)
                 continue
             if line.startswith(marker):
                 return None

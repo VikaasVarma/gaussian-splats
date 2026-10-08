@@ -109,10 +109,10 @@ def _composite_bwd_kernel(
         yy = tl.load(inverse_covariance + covariance_offset + 3, mask=valid[:, None], other=0.0)
         distance = xx * dx * dx + 2.0 * xy * dx * dy + yy * dy * dy
         probability = tl.exp(-0.5 * distance)
-        projected_opacity = tl.load(
+        projected_opacity_value = tl.load(
             projected_opacity + gaussian_id[:, None], mask=valid[:, None], other=0.0
         )
-        alpha_raw = projected_opacity * probability
+        alpha_raw = projected_opacity_value * probability
         alpha = tl.minimum(alpha_raw, 0.99)
         position = intersection - start
         active = (
@@ -147,7 +147,7 @@ def _composite_bwd_kernel(
         weight_grad += grad_b[None, :] * (color_b - suffix_b)
         grad_alpha = tl.where(active, forward * weight_grad, 0.0)
         grad_alpha = tl.where(alpha_raw < 0.99, grad_alpha, 0.0)
-        probability_grad = grad_alpha * projected_opacity
+        probability_grad = grad_alpha * projected_opacity_value
         grad_opacity_value = grad_alpha * probability
         grad_color_value = forward * effective_alpha
         _write_gradient(
