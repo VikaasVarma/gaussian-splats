@@ -31,3 +31,20 @@ export function addResolution(form, initial = "640x480") {
 export function resolution(form) {
   return form.elements.resolution.value.split("x").map(Number);
 }
+
+export function renderSettings(container, settings = []) {
+  container.replaceChildren();
+  for (const { label, options, ...attributes } of settings) {
+    const row = document.createElement("label");
+    row.textContent = label;
+    const input = document.createElement(options ? "select" : "input");
+    if (options) {
+      for (const value of options) input.add(new Option(value, value));
+    } else {
+      input.type = "number";
+    }
+    Object.assign(input, { required: true, ...attributes });
+    row.append(input);
+    container.append(row);
+  }
+}

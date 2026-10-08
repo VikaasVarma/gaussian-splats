@@ -1,5 +1,5 @@
 import { createViewer, request, upload } from "/shared/viewer.js";
-import { addResolution, loadUPlot, resolution } from "/common/components.js";
+import { addResolution, loadUPlot, resolution, renderSettings } from "/common/components.js";
 
 const form = document.querySelector("form");
 const status = document.querySelector("#status");
@@ -13,20 +13,7 @@ for (const renderer of renderers) {
 
 function showRendererSettings() {
   const renderer = renderers.find(item => item.value === form.elements.renderer.value);
-  rendererSettings.replaceChildren();
-  for (const setting of renderer?.settings ?? []) {
-    const label = document.createElement("label");
-    label.textContent = setting.label;
-    const input = document.createElement("input");
-    input.name = setting.name;
-    input.type = "number";
-    input.value = setting.value;
-    input.min = setting.min;
-    if (setting.max !== undefined) input.max = setting.max;
-    input.step = setting.step;
-    label.append(input);
-    rendererSettings.append(label);
-  }
+  renderSettings(rendererSettings, renderer.settings);
 }
 
 form.elements.renderer.addEventListener("change", showRendererSettings);

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PlayCanvas viewer</title>
+    <link rel="stylesheet" href="/shared/styles.css" />
+    <script type="importmap">
+      {"imports": {"playcanvas": "https://cdn.jsdelivr.net/npm/playcanvas/+esm"}}
+    </script>
+  </head>
+  <body data-endpoint="/viewer">
+    <details id="settings" class="panel">
+      <summary>Settings</summary>
+      <form>
+        <label>Checkpoint <input id="checkpoint" type="file" accept=".pt" /></label>
+        <label>Splats <span class="input-with-output"><input name="num_splats" type="number" required min="1" value="10000" /><output id="splat-total">/ --</output></span></label>
+        <label>SH degree <input name="sh_degree" type="number" required min="0" max="3" value="3" /></label>
+        <label>Scale <input name="scale" type="number" required min="0.001" step="0.01" value="1" /></label>
+        <label>Opacity <input name="opacity" type="number" required min="0" step="0.01" value="1" /></label>
+        <label>Near plane <input name="near" type="number" required min="0.001" step="0.1" value="0.1" /></label>
+        <label>Far plane <input name="far" type="number" required min="1" step="1" value="100" /></label>
+        <label>Background <input name="background" type="color" value="#000000" /></label>
+        <button id="pause" type="button">Pause scene</button>
+        <div id="status">Choose a checkpoint</div>
+      </form>
+    </details>
+    <script type="module" src="page.js"></script>
+  </body>
+</html>

@@ -4,6 +4,8 @@ from typing import Annotated
 import torch
 import typer
 
+from gaussian_splats.splats.splats import GaussianSplat
+
 from .blender import BlenderSession
 from .query import query_scene
 from .renderers import CyclesBackend, PhongBackend, WorkbenchBackend
@@ -18,8 +20,6 @@ app.add_typer(bake_app, name="bake")
 
 @torch.no_grad()
 def _run_bake(
-    mesh: Path,
-    output: Path | None,
     resolution: int | None,
     n_splats: int | None,
     sigma: float,
@@ -29,12 +29,12 @@ def _run_bake(
     sh_degree: int,
     view_samples: int,
     sh_smoothing_percent: float,
-) -> None:
+) -> tuple[GaussianSplat, GaussianSplat]:
     scene = scene.to(torch.device(device))
     splats, triangle_id, barycentric = sample_splats(
         scene, resolution=resolution, n_splats=n_splats, sigma=sigma
     )
-    baked, invalid = query_scene(
+    return query_scene(
         scene,
         splats,
         backend,
@@ -45,11 +45,12 @@ def _run_bake(
         sh_smoothing_percent=sh_smoothing_percent,
     )
 
-    output = output or mesh.with_suffix(".pt")
+
+def _save_bake(baked: GaussianSplat, invalid: GaussianSplat, output: Path) -> None:
     baked.save_checkpoint(output)
     typer.echo(f"Wrote {output} ({len(baked.mean):,} splats)")
 
-    if invalid.mean.any():
+    if invalid.num_points:
         invalid_output = output.with_name(f"{output.stem}.invalid.pt")
         invalid.save_checkpoint(invalid_output)
         typer.echo(f"Wrote invalid samples to {invalid_output}")
@@ -61,7 +62,12 @@ def bake_cycles(
     blender: Annotated[str, typer.Option(help="Blender executable.")] = "blender",
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     resolution: Annotated[int | None, typer.Option("--resolution", min=2)] = None,
-    n_splats: Annotated[int | None, typer.Option("--n-splats", min=1)] = None,
+    n_splats: Annotated[
+        int | None,
+        typer.Option(
+            "--n-splats", min=1, help="Target count; grid coverage determines the final count."
+        ),
+    ] = None,
     seed: Annotated[int, typer.Option(help="Sampling seed.")] = 0,
     sigma: Annotated[float, typer.Option(min=0)] = 0.6825,
     device: Annotated[
@@ -82,15 +88,11 @@ def bake_cycles(
     exposure: Annotated[float, typer.Option()] = 0.0,
 ) -> None:
     torch.manual_seed(seed)
-    if resolution is None and n_splats is None:
-        n_splats = 250000
     with BlenderSession(mesh, blender) as session:
         backend = CyclesBackend(
             session, cycles_samples, ray_batch_size, eps, exposure, cycles_device, cycles_workers
         )
-        _run_bake(
-            mesh,
-            output,
+        baked, invalid = _run_bake(
             resolution,
             n_splats,
             sigma,
@@ -102,6 +104,8 @@ def bake_cycles(
             sh_smoothing_percent,
         )
 
+    _save_bake(baked, invalid, output or mesh.with_suffix(".pt"))
+
 
 @bake_app.command("workbench")
 def bake_workbench(
@@ -109,7 +113,12 @@ def bake_workbench(
     blender: Annotated[str, typer.Option(help="Blender executable.")] = "blender",
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     resolution: Annotated[int | None, typer.Option("--resolution", min=2)] = None,
-    n_splats: Annotated[int | None, typer.Option("--n-splats", min=1)] = None,
+    n_splats: Annotated[
+        int | None,
+        typer.Option(
+            "--n-splats", min=1, help="Target count; grid coverage determines the final count."
+        ),
+    ] = None,
     sigma: Annotated[float, typer.Option(min=0)] = 0.65,
     device: Annotated[
         str, typer.Option("--device", help="PyTorch device for sampling and rendering.")
@@ -126,9 +135,7 @@ def bake_workbench(
         scene = session.scene
 
     backend = WorkbenchBackend(ambient_strength, diffuse_strength)
-    _run_bake(
-        mesh,
-        output,
+    baked, invalid = _run_bake(
         resolution,
         n_splats,
         sigma,
@@ -140,6 +147,8 @@ def bake_workbench(
         sh_smoothing_percent,
     )
 
+    _save_bake(baked, invalid, output or mesh.with_suffix(".pt"))
+
 
 @bake_app.command("phong")
 def bake_phong(
@@ -147,7 +156,12 @@ def bake_phong(
     blender: Annotated[str, typer.Option(help="Blender executable.")] = "blender",
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     resolution: Annotated[int | None, typer.Option("--resolution", min=2)] = None,
-    n_splats: Annotated[int | None, typer.Option("--n-splats", min=1)] = None,
+    n_splats: Annotated[
+        int | None,
+        typer.Option(
+            "--n-splats", min=1, help="Target count; grid coverage determines the final count."
+        ),
+    ] = None,
     seed: Annotated[int, typer.Option(help="Sampling seed.")] = 0,
     sigma: Annotated[float, typer.Option(min=0)] = 0.65,
     device: Annotated[
@@ -171,9 +185,7 @@ def bake_phong(
         diffuse_strength,
         specular_strength,
     )
-    _run_bake(
-        mesh,
-        output,
+    baked, invalid = _run_bake(
         resolution,
         n_splats,
         sigma,
@@ -184,6 +196,8 @@ def bake_phong(
         view_samples,
         sh_smoothing_percent,
     )
+
+    _save_bake(baked, invalid, output or mesh.with_suffix(".pt"))
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ Open <http://127.0.0.1:7007/gaussian/>. See [viewer](../visualize/README.md) for
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | Cornell box | Cycles | 262,144 | 1073.74 | 134.22 | 0.9742 | 34.92 |
 | Damaged Helmet | Cycles | 262,144 | 1073.74 | 1073.74 | 0.9576 | 31.37 |
-| Avocado | Cycles | 131,072 | 1073.74 | 16.78 | 0.9836 | 40.38 |
+| Avocado | Cycles | 131,324 | 1073.74 | 268.95 | 0.9894 | 41.40 |
 | Boom Box | Cycles | 262,144 | 1073.74 | 536.87 | 0.9608 | 31.79 |
 | Duck | Phong | 131,072 | 0.26 | 0.13 | 0.9852 | 31.44 |
 | Barramundi Fish | Phong | 131,072 | 0.26 | 0.13 | 0.9636 | 36.87 |
@@ -66,7 +66,7 @@ Splats baked with SH degree 10, 128 directions per splat, 32 samples per directi
 ![Four views: reference left, Gaussian splats right](examples/cycles-avocado.png)
 
 Cycles at 4096 samples per pixel with exposure 0.
-Splats baked with SH degree 2, 16 directions per splat, 8 samples per direction.
+Splats baked on a projected grid with SH degree 2, 16 directions per splat, 128 samples per direction.
 
 ### Boom Box · Cycles
 

@@ -4,11 +4,10 @@ from pathlib import Path
 import torch
 from starlette.responses import JSONResponse
 
-from gaussian_splats.bake.query import query_scene
+from gaussian_splats.bake.__main__ import _run_bake
 from gaussian_splats.bake.renderers.cycles import CyclesBackend
 from gaussian_splats.bake.renderers.phong import PhongBackend
 from gaussian_splats.bake.renderers.workbench import WorkbenchBackend
-from gaussian_splats.bake.sample import sample_splats
 from gaussian_splats.splats.splats import GaussianSplat
 from gaussian_splats.visualize import Frame
 from gaussian_splats.visualize.gaussian.backend import render_gaussians
@@ -35,9 +34,12 @@ class BakeViewer:
             case "cycles":
                 return CyclesBackend(
                     self.scene.session,
-                    samples=int(settings.get("samples", 1)),
-                    batch_size=int(settings.get("ray_batch_size", 4096)),
-                    exposure=float(settings.get("exposure", 4.0)),
+                    samples=int(settings.get("samples", 32)),
+                    batch_size=int(settings.get("ray_batch_size", 1048576)),
+                    eps=float(settings.get("eps", 1e-4)),
+                    device=settings.get("cycles_device", "CPU"),
+                    workers=int(settings.get("cycles_workers", 1)),
+                    exposure=float(settings.get("exposure", 0.0)),
                 )
             case "torch-workbench":
                 return WorkbenchBackend(
@@ -64,14 +66,20 @@ class BakeViewer:
             camera,
             left_width,
             height,
-            exposure=float(settings.get("exposure", 4.0)),
+            exposure=float(settings.get("exposure", 0.0)),
         )
         if self.splats is None:
             right = Frame(
                 left.new_zeros((height, right_width, 3)), metadata={"X-Total-Splats": "0"}
             )
         else:
-            right = render_gaussians(self.splats, camera, settings, right_width, height)
+            right = render_gaussians(
+                self.splats,
+                camera,
+                {**settings, "num_splats": self.splats.num_points},
+                right_width,
+                height,
+            )
         divider = right.image.new_ones((height, 1, 3))
         return Frame(
             torch.cat((left.to(right.image.device), divider, right.image), dim=1),
@@ -83,15 +91,21 @@ class BakeViewer:
         scene = self.scene.scene
         if scene is None:
             raise ValueError("Load a scene before baking")
-        sampled, triangle_id, barycentric = sample_splats(
-            scene,
-            n_splats=n_splats,
+        device = scene.vertices.device
+        torch.manual_seed(int(settings.get("seed", 0)))
+        resolution = settings.get("sampling_resolution")
+        baked, _ = _run_bake(
+            scene=scene,
+            backend=self.backend(settings),
+            device=settings.get("device", "cpu"),
+            resolution=int(resolution) if resolution else None,
+            n_splats=None if resolution else n_splats,
             sigma=float(settings.get("sigma", 0.65)),
+            sh_degree=int(settings.get("sh_degree", 2)),
+            view_samples=int(settings.get("view_samples", 32)),
+            sh_smoothing_percent=float(settings.get("sh_smoothing_percent", 0)),
         )
-        baked, _ = query_scene(
-            scene, sampled, self.backend(settings), triangle_id, barycentric
-        )
-        self.splats = baked.to(scene.vertices.device).eval()
+        self.splats = baked.to(device).eval()
         return {"splats": self.splats.num_points}
 
     def close(self):

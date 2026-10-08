@@ -63,12 +63,14 @@ def sample_splats(
     )
     local_id = torch.arange(n_splats, device=device) - offsets
 
-    # Create random evenly distributed samples
-    u = (local_id + 0.5) / counts
-    v = torch.frac(local_id * PHI + triangle_id * PI)
-
-    root = torch.sqrt(u)
-    barycentric = torch.stack((1.0 - root, root * (1.0 - v), root * v), dim=-1)
+    # Fill each triangle with a deterministic 2D grid in barycentric UV space.
+    rows = counts.float().sqrt().ceil().long()
+    columns = (counts + rows - 1) // rows
+    row = local_id // columns
+    column = local_id % columns
+    u = (row + 0.5) / rows
+    v = (column + 0.5) / columns * (1.0 - u)
+    barycentric = torch.stack((1.0 - u - v, u, v), dim=-1)
 
     # Compute GS Parameters
     positions = (barycentric[..., None] * triangles[triangle_id]).sum(dim=1)

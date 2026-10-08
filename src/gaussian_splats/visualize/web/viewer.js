@@ -30,7 +30,7 @@ export async function upload(input, url, header) {
   }
 }
 
-function cameraControls(canvas, hud, endpoint, signal, fail) {
+export function createCameraControls(canvas, hud, update, signal, fail) {
   const listen = (target, event, handler) => target.addEventListener(event, handler, { signal });
   const keys = new Set();
   let look = [0, 0], movement = [0, 0, 0], elapsed = 0;
@@ -90,13 +90,30 @@ function cameraControls(canvas, hud, endpoint, signal, fail) {
     look = [0, 0];
     elapsed = 0;
     cameraPending = true;
-    post(`${endpoint}/camera`, data, signal)
+    Promise.resolve(update(data))
       .finally(() => { cameraPending = false; }).catch(fail);
   }, 50);
 
   return () => {
     clearInterval(cameraTimer);
     if (document.pointerLockElement === canvas) document.exitPointerLock();
+  };
+}
+
+export function createHud(container) {
+  const hud = document.createElement("details");
+  hud.className = "panel viewer-hud";
+  hud.open = true;
+  hud.innerHTML = `<summary>Statistics</summary><div class="stats"></div>
+    <div class="fps-chart"></div>
+    <div class="frame-status"></div>
+    <footer>Click to look · WASD to move · Space/Shift up/down · H toggles HUD</footer>`;
+  container.append(hud);
+  return {
+    hud,
+    stats: hud.querySelector(".stats"),
+    status: hud.querySelector(".frame-status"),
+    charts: createCharts(hud),
   };
 }
 
@@ -110,21 +127,13 @@ export function createViewer({
   canvas.classList.add("viewer-canvas");
   canvas.tabIndex = 0;
   const context = canvas.getContext("2d", { alpha: false });
-  const hud = document.createElement("details");
-  hud.className = "panel viewer-hud";
-  hud.open = true;
-  hud.innerHTML = `<summary>Statistics</summary><div class="stats"></div>
-    <div class="fps-chart"></div><div class="timing-chart"></div>
-    <div class="frame-status"></div>
-    <footer>Click to look · WASD to move · Space/Shift up/down · H toggles HUD</footer>`;
-  container.append(hud);
-  const stats = hud.querySelector(".stats");
-  const status = hud.querySelector(".frame-status");
-  const charts = createCharts(hud);
+  const { hud, stats, status, charts } = createHud(container);
   const lifetime = new AbortController();
   const { signal } = lifetime;
   let lastFrame = 0, fps = 0, animation, emptyTimer, paused = false;
-  const stopCamera = cameraControls(canvas, hud, endpoint, signal, fail);
+  const stopCamera = createCameraControls(
+    canvas, hud, data => post(`${endpoint}/camera`, data, signal), signal, fail
+  );
   if (typeof settings !== "function") {
     const form = settings;
     let values = Object.fromEntries(new FormData(form));
@@ -168,8 +177,8 @@ export function createViewer({
     lastFrame = now;
     const milliseconds = now - started;
     const timings = JSON.parse(response.headers.get("X-Timings"));
-    charts.add(fps, timings);
-    stats.textContent = `FPS ${fps.toFixed(1)} · Frame ${milliseconds.toFixed(0)} ms`;
+    charts.add(fps);
+    stats.textContent = `FPS ${fps.toFixed(1)}`;
     status.textContent = "";
     onFrame({ response, fps, milliseconds, timings });
     if (!paused) animation = requestAnimationFrame(() => render().catch(fail));

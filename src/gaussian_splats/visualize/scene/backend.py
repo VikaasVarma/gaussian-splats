@@ -90,20 +90,73 @@ RENDERERS = (
 RAY_RENDERERS = tuple(
     {
         **renderer,
-        "settings": renderer.get("settings", ())
+        "settings": tuple(
+            {
+                **setting,
+                "value": {"samples": 32, "exposure": 0}.get(setting["name"], setting["value"]),
+            }
+            if renderer["value"] == "cycles"
+            else setting
+            for setting in renderer.get("settings", ())
+        )
         + (
             {
-                "name": "ray_batch_size",
-                "label": "Ray Batch Size",
-                "value": 4096,
-                "min": 1,
-                "max": 4096,
+                "name": "sigma",
+                "label": "Sigma",
+                "value": 0.6825 if renderer["value"] == "cycles" else 0.65,
+                "min": 0,
+                "step": "any",
+            },
+            {
+                "name": "sh_degree",
+                "label": "SH degree",
+                "value": 6 if renderer["value"] == "cycles" else 2,
+                "min": 0,
+                "max": 3 if renderer["value"] == "torch-workbench" else 12,
                 "step": 1,
             },
+            {
+                "name": "view_samples",
+                "label": "Directions per splat",
+                "value": 128 if renderer["value"] == "cycles" else 32,
+                "min": 1,
+                "step": 1,
+            },
+        )
+        + (
+            (
+                {
+                    "name": "cycles_device",
+                    "label": "Cycles query device",
+                    "value": "CPU",
+                    "options": ["CPU", "OPTIX"],
+                },
+                {
+                    "name": "cycles_workers",
+                    "label": "Cycles workers",
+                    "value": 1,
+                    "min": 1,
+                    "step": 1,
+                },
+                {
+                    "name": "ray_batch_size",
+                    "label": "Query batch size",
+                    "value": 1048576,
+                    "min": 1,
+                    "step": 1,
+                },
+                {
+                    "name": "eps",
+                    "label": "Ray offset (eps)",
+                    "value": 1e-4,
+                    "min": 0,
+                    "step": "any",
+                },
+            )
+            if renderer["value"] == "cycles"
+            else ()
         ),
     }
-    if renderer["value"] == "cycles"
-    else renderer
     for renderer in RENDERERS
     if renderer["value"] in {"cycles", "torch-workbench", "phong"}
 )

@@ -1,5 +1,5 @@
 import { createViewer, post, request, upload } from "/shared/viewer.js";
-import { addResolution, loadUPlot, resolution } from "/common/components.js";
+import { addResolution, loadUPlot, resolution, renderSettings } from "/common/components.js";
 
 const form = document.querySelector("form");
 const status = document.querySelector("#status");
@@ -15,20 +15,7 @@ form.elements.renderer.value = "torch-workbench";
 
 function showRendererSettings() {
   const renderer = renderers.find(item => item.value === form.elements.renderer.value);
-  rendererSettings.replaceChildren();
-  for (const setting of renderer?.settings ?? []) {
-    const label = document.createElement("label");
-    label.textContent = setting.label;
-    const input = document.createElement("input");
-    input.name = setting.name;
-    input.type = "number";
-    input.value = setting.value;
-    input.min = setting.min;
-    if (setting.max !== undefined) input.max = setting.max;
-    input.step = setting.step;
-    label.append(input);
-    rendererSettings.append(label);
-  }
+  renderSettings(rendererSettings, renderer.settings);
   document.querySelector("#left-label").textContent = renderer.label;
   bake.textContent = `Bake ${renderer.label} → Splats`;
 }
@@ -59,21 +46,17 @@ document.querySelector("#scene").onchange = async event => {
 };
 
 bake.onclick = async () => {
+  if (!form.reportValidity()) return;
   bake.disabled = true;
   status.textContent = "Baking…";
   try {
     const result = await (await post(`${endpoint}/bake`, {
       n_splats: Number(form.elements.num_splats.value),
-      sigma: Number(form.elements.sigma.value),
-      renderer: form.elements.renderer.value,
-      samples: form.elements.samples?.value,
-      ray_batch_size: form.elements.ray_batch_size?.value,
-      exposure: form.elements.exposure?.value,
-      ambient_strength: form.elements.ambient_strength?.value,
-      diffuse_strength: form.elements.diffuse_strength?.value,
-      specular_strength: form.elements.specular_strength?.value,
+      ...Object.fromEntries(new FormData(form)),
     })).json();
     status.textContent = `Ready · ${result.splats.toLocaleString()} splats`;
+  } catch (error) {
+    status.textContent = error.message;
   } finally {
     bake.disabled = false;
   }

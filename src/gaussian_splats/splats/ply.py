@@ -36,7 +36,7 @@ def save_ply(state: dict[str, torch.Tensor], path: str | Path):
             mean,
             normals,
             color[:, 0],
-            color[:, 1:].reshape(N, (D - 1) * 3),
+            color[:, 1:].transpose(0, 2, 1).reshape(N, (D - 1) * 3),
             opacity.reshape(N, 1),
             scale,
             rotation,
@@ -71,7 +71,9 @@ def load_ply(path):
     D = len([name for name in names if name.startswith("f_rest_")])
     dc_color = _values(vertex, [f"f_dc_{i}" for i in range(3)])
     sh_color = (
-        _values(vertex, [f"f_rest_{i}" for i in range(D)]).reshape(len(vertex), -1, 3)
+        _values(vertex, [f"f_rest_{i}" for i in range(D)])
+        .reshape(len(vertex), 3, -1)
+        .transpose(0, 2, 1)
         if D
         else np.empty((len(vertex), 0, 3), dtype=dc_color.dtype)
     )
