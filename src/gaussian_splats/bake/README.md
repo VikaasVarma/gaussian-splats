@@ -1,4 +1,4 @@
-# Gaussian Splat Render Baking
+# Baking Ray Tracing into Gaussian Splats
 
 A ray-tracer renders a scene by shooting rays from a light source, bouncing them around the scene, and accumulating color until they enter a camera lens.
 
