@@ -20,7 +20,7 @@ class CyclesBackend(RayBackend, RenderBackend):
         self,
         session: BlenderSession,
         samples: int = 1,
-        batch_size: int = 4096,
+        batch_size: int = 1048576,
         eps: float = 1e-4,
         exposure: float = 0.0,
         device: str = "CPU",

@@ -83,7 +83,7 @@ class PinholeCamera(Camera):
         mean: torch.Tensor,  # N x 3
         rotation: torch.Tensor,  # N x 3 x 3
         scale: torch.Tensor,  # N x 3
-        covariance_epsilon: float = 0.3,
+        covariance_epsilon: float = 0.03,
     ) -> tuple[
         torch.Tensor,  # Projected Means: N x 3
         torch.Tensor,  # 2D covariance: N x 2 x 2

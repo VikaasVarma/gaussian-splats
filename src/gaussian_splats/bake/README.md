@@ -1,15 +1,15 @@
-# Mesh-to-splat bake
+# Gaussian Splat Render Baking
 
-Convert a glTF/GLB mesh's geometry and appearance into Gaussian splats using a rendering engine.
+A ray-traced renderer queries the color arriving along rays shot through a camera to form a complete image.
 
+Instead, using the same renderer, we query the color arriving along rays shot from the surface of a mesh. This information is baked into a standard 3D Gaussian Splat scene and can be viewed from arbitrary angles.
 
 ## Pipeline
 
-1. Sample splats on the mesh surface and align them to its normals.
-2. Query radiance in several outgoing directions per splat.
-3. Fit View-Dependent SH color opacity.
-4. Post-process (optional SH smoothing) and checkpoint
-
+1. Sample normal-aligned disk-shaped splats on the mesh surface according to triangle area.
+2. Query radiance per splat from different viewing angles.
+3. Fit opacity and view-dependent SH color.
+4. Optionally smooth and checkpoint
 
 ## Usage
 
@@ -19,55 +19,81 @@ The below bakes the Cornell box using blender's cycles renderer.
 uv run python -m gaussian_splats.bake bake cycles \
   --mesh assets/cornell-box/cornell_box_core.glb \
   --output output/cornell.pt \
-  --cycles-device OPTIX \
-  --resolution 256 --sigma 0.6825 \
-  --samples 128 --view-samples 128 --sh-degree 8 \
+  --cycles-device OPTIX --device cuda \
+  --n-splats 262144 --sigma 0.6825 \
+  --samples 32 --view-samples 16 --sh-degree 0 \
   --exposure 4 --sh-smoothing-percent 10 \
-  --cycles-workers 2
+  --cycles-workers 1
 ```
 
 View the checkpoint:
 
 ```bash
-uv run visualize
+uv run visualize --checkpoint output/cornell.pt
 ```
 
-Open <http://127.0.0.1:7007/gaussian/> and select `output/cornell.pt`.
-See the [viewer README](../visualize/README.md) for scene previews and renderer comparisons.
+Open <http://127.0.0.1:7007/gaussian/>. See [viewer](../visualize/README.md) for more options.
 
 ## Examples
 
 | Scene | Renderer | Splats | Camera Rays (M) | Bake Rays (M) | SSIM | PSNR (dB) |
-|---|---|---:|---:|---:|---:|---:|
-| Cornell box | Cycles | 425,242 | 1073.74 | 54.43 | 0.9704 | 35.42 |
-| Damaged Helmet | Cycles | 250,000 | 1073.74 | 32.00 | 0.9570 | 31.10 |
-| Avocado | Cycles | 250,000 | 1073.74 | 32.00 | 0.9890 | 42.26 |
-| Duck | Phong | 250,000 | 0.26 | 8.00 | 0.9641 | 25.69 |
-| Barramundi Fish | Phong | 250,000 | 0.26 | 8.00 | 0.9326 | 32.85 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Cornell box | Cycles | 262,144 | 1073.74 | 134.22 | 0.9742 | 34.92 |
+| Damaged Helmet | Cycles | 262,144 | 1073.74 | 1073.74 | 0.9576 | 31.37 |
+| Avocado | Cycles | 131,072 | 1073.74 | 16.78 | 0.9836 | 40.38 |
+| Boom Box | Cycles | 262,144 | 1073.74 | 536.87 | 0.9608 | 31.79 |
+| Duck | Phong | 131,072 | 0.26 | 0.13 | 0.9852 | 31.44 |
+| Barramundi Fish | Phong | 131,072 | 0.26 | 0.13 | 0.9636 | 36.87 |
 
-Camera rays are primary samples per 512×512 view; bake rays are outgoing radiance queries across all splats, excluding path samples and secondary/shadow rays. Image stats average four full-frame 8-bit sRGB views.
-
-Cycles: SH8, 128 directions, covariance epsilon 0.03. Phong: SH2, 32 directions, epsilon 0.3. No refinement.
+*Reference left, splats right. Image stats average four full-frame 512×512 sRGB views.*
 
 ### Cornell box · Cycles
 
-![Four Cornell box views: Cycles left, Gaussian splats right](examples/cornell.png)
+![Four views: reference left, Gaussian splats right](examples/cornell.png)
+
+Cycles at 4096 samples per pixel with exposure 4.
+Splats baked with SH degree 0, 16 directions per splat, 32 samples per direction, 10% SH smoothing.
 
 ### Damaged Helmet · Cycles
 
-![Four Damaged Helmet views: Cycles left, Gaussian splats right](examples/cycles-damaged-helmet.png)
+![Four views: reference left, Gaussian splats right](examples/cycles-damaged-helmet.png)
+
+Cycles at 4096 samples per pixel with exposure 0.
+Splats baked with SH degree 10, 128 directions per splat, 32 samples per direction.
 
 ### Avocado · Cycles
 
-![Four Avocado views: Cycles left, Gaussian splats right](examples/cycles-avocado.png)
+![Four views: reference left, Gaussian splats right](examples/cycles-avocado.png)
+
+Cycles at 4096 samples per pixel with exposure 0.
+Splats baked with SH degree 2, 16 directions per splat, 8 samples per direction.
+
+### Boom Box · Cycles
+
+![Four views: reference left, Gaussian splats right](examples/cycles-boom-box.png)
+
+Cycles at 4096 samples per pixel with exposure 0.
+Splats baked with SH degree 8, 128 directions per splat, 16 samples per direction.
 
 ### Duck · Phong
 
-![Four Duck views: Phong left, Gaussian splats right](examples/phong-duck.png)
+![Four views: reference left, Gaussian splats right](examples/phong-duck.png)
+
+Phong at 1 sample per pixel.
+Splats baked with SH degree 0, 1 direction per splat, 1 sample per direction.
 
 ### Barramundi Fish · Phong
 
-![Four Barramundi Fish views: Phong left, Gaussian splats right](examples/phong-fish.png)
+![Four views: reference left, Gaussian splats right](examples/phong-fish.png)
+
+Phong at 1 sample per pixel.
+Splats baked with SH degree 0, 1 direction per splat, 1 sample per direction.
+
+## Room for Improvement
+
+- Sharp specular highlights do not transfer well (see Damaged Helmet and Boom Box). They tend to diffuse out through the texture. Possible solutions: material aware sampling (sample more views directions from highly specular surfaces); better SH fitting (We regularize heavily (both by damping high frequencies and by solving in sRGB space)); maybe spherical voronois?
+- Soft splats struggle with straight edges, silhouettes and fine detail (see Cornell's box edges and Fish's scales and fins). Possible solutions: curvature aware splat sampling (change density, or footprint size)
+- Faster baking. We perform theoretically less sample queries than cycles but don't see the gains (e.g. 34.7s bake vs 3.3s render for the damaged helmet and 4.4s bake vs 8.4s render the cornell box).
 
 
 ## Credits
@@ -79,8 +105,7 @@ Inspiration and thanks to [Mesh2Splat](https://github.com/electronicarts/mesh2sp
 | Asset | Credits and license |
 |---|---|
 | [Damaged Helmet](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/DamagedHelmet) | ctxwing (2018), CC BY 4.0; earlier model by theblueturtle_ (2016), CC BY-NC 4.0 |
-| [Boom Box](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoomBox) | Microsoft (2017), CC0 1.0 |
 | [Avocado](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Avocado) | Microsoft (2017), CC0 1.0 |
-| [Barramundi Fish](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BarramundiFish) | Microsoft (2017), CC0 1.0 |
+| [Boom Box](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BoomBox) | Microsoft (2017), CC0 1.0 |
 | [Duck](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Duck) | Sony (2006), SCEA Shared Source License 1.0 |
-| [Fox](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox) | PixelMannen model (2014), CC0 1.0; tomkranis rigging/animation (2014), CC BY 4.0; @AsoboStudio and @scurest glTF conversion (2017), CC BY 4.0 |
+| [Barramundi Fish](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/BarramundiFish) | Microsoft (2017), CC0 1.0 |

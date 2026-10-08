@@ -17,6 +17,7 @@ SHADER = r"""shader ray_table_camera(
     string origin_map = "",
     string direction_map = "",
     int width = 1,
+    int height = 1,
     output point position = point(0.0),
     output vector direction = vector(0.0),
     output color throughput = color(0.0))
@@ -24,11 +25,13 @@ SHADER = r"""shader ray_table_camera(
     point raster = camera_shader_raster_position();
     float px = clamp(floor(raster[0] * width), 0.0, width - 1.0);
     float s = (px + 0.5) / width;
+    float py = clamp(floor((1.0 - raster[1]) * height), 0.0, height - 1.0);
+    float t = (py + 0.5) / height;
     float footprint = 0.0;
     float valid = 0.0;
-    color origin = texture(origin_map, s, 0.5, 0.0, 0.0, 0.0, 0.0,
+    color origin = texture(origin_map, s, t, 0.0, 0.0, 0.0, 0.0,
                            "interp", "closest", "wrap", "clamp", "alpha", footprint);
-    color encoded_direction = texture(direction_map, s, 0.5, 0.0, 0.0, 0.0, 0.0,
+    color encoded_direction = texture(direction_map, s, t, 0.0, 0.0, 0.0, 0.0,
                                       "interp", "closest", "wrap", "clamp", "alpha", valid);
     vector ray_direction = vector(encoded_direction[0], encoded_direction[1], encoded_direction[2]);
     if (valid > 0.5 && length(ray_direction) > 0.0) {
@@ -373,16 +376,26 @@ def render_reference_bundle(scene, request):
     metadata = {
         "blender_version": bpy.app.version_string,
         "device": device,
-        "seed": scene.cycles.seed, "samples": scene.cycles.samples,
-        "adaptive_sampling": False, "denoising": False,
+        "seed": scene.cycles.seed,
+        "samples": scene.cycles.samples,
+        "adaptive_sampling": False,
+        "denoising": False,
         "view_transform": scene.view_settings.view_transform,
-        "look": scene.view_settings.look, "exposure": scene.view_settings.exposure,
+        "look": scene.view_settings.look,
+        "exposure": scene.view_settings.exposure,
         "display_device": scene.display_settings.display_device,
         "Q_camera": scene.render.resolution_x * scene.render.resolution_y * scene.cycles.samples,
-        "Q_segments": None, "mask_source": "Cycles Depth pass (opaque geometry)",
+        "Q_segments": None,
+        "mask_source": "Cycles Depth pass (opaque geometry)",
     }
-    np.savez(output, linear_rgb=linear, display_rgb=display, foreground=foreground,
-             depth=depth, metadata=json.dumps(metadata))
+    np.savez(
+        output,
+        linear_rgb=linear,
+        display_rgb=display,
+        foreground=foreground,
+        depth=depth,
+        metadata=json.dumps(metadata),
+    )
 
 
 def setup_compositor(scene):
@@ -404,6 +417,7 @@ def setup_compositor(scene):
 
 def query(scene, origins, directions, footprints, workdir, request, samples, batch_size, device):
     configure_cycles(scene, samples)
+    scene.render.use_persistent_data = True
     if device == "OPTIX":
         preferences = bpy.context.preferences.addons["cycles"].preferences
         preferences.compute_device_type = "OPTIX"
@@ -427,28 +441,33 @@ def query(scene, origins, directions, footprints, workdir, request, samples, bat
     for batch, start in enumerate(range(0, len(origins), batch_size)):
         stop = min(start + batch_size, len(origins))
         width = stop - start
-        render_width = max(width, 4)
-        origin_table = np.zeros((1, render_width, 4), dtype=np.float32)
-        direction_table = np.zeros((1, render_width, 4), dtype=np.float32)
-        origin_table[0, :width, :3] = origins[start:stop]
-        origin_table[0, :width, 2] *= -1
-        origin_table[0, :width, 3] = footprints[start:stop]
-        direction_table[0, :width, :3] = -directions[start:stop]
-        direction_table[0, :width, 2] *= -1
-        direction_table[0, :width, 3] = 1
+        render_width = min(1024, max(width, 4))
+        render_height = (width + render_width - 1) // render_width
+        origin_table = np.zeros((render_height, render_width, 4), dtype=np.float32)
+        direction_table = np.zeros((render_height, render_width, 4), dtype=np.float32)
+        origin_table.reshape(-1, 4)[:width, :3] = origins[start:stop]
+        origin_table.reshape(-1, 4)[:width, 2] *= -1
+        origin_table.reshape(-1, 4)[:width, 3] = footprints[start:stop]
+        direction_table.reshape(-1, 4)[:width, :3] = -directions[start:stop]
+        direction_table.reshape(-1, 4)[:width, 2] *= -1
+        direction_table.reshape(-1, 4)[:width, 3] = 1
         stem = f"{request}-{batch:05d}"
         origin_path = workdir / f"{stem}.origins.exr"
         direction_path = workdir / f"{stem}.directions.exr"
-        shader = workdir / f"{stem}.osl"
+        shader = workdir / "ray-table.osl"
         write_exr(origin_path, origin_table)
         write_exr(direction_path, direction_table)
-        shader.write_text(
-            SHADER.replace('string origin_map = ""', f'string origin_map = "{origin_path}"')
-            .replace('string direction_map = ""', f'string direction_map = "{direction_path}"')
-            .replace("int width = 1", f"int width = {render_width}")
-        )
-        scene.camera = make_camera(shader)
-        scene.render.resolution_x, scene.render.resolution_y = render_width, 1
+        if not shader.exists():
+            shader.write_text(SHADER)
+            scene.camera = make_camera(shader)
+        scene.camera = bpy.data.objects["RayTableCamera"]
+        parameters = scene.camera.data.cycles_custom
+        parameters["origin_map"] = str(origin_path)
+        parameters["direction_map"] = str(direction_path)
+        parameters["width"] = render_width
+        parameters["height"] = render_height
+        scene.camera.data.update_tag()
+        scene.render.resolution_x, scene.render.resolution_y = render_width, render_height
         for output, suffix in ((combined_output, "combined"), (position_output, "position")):
             output.directory = str(workdir)
             output.file_name = f"{stem}.{suffix}"
@@ -463,6 +482,8 @@ def query(scene, origins, directions, footprints, workdir, request, samples, bat
         position = position[..., :3].reshape(-1, 3)[:width]
         colors[start:stop], alphas[start:stop] = combined[:, :3], combined[:, 3]
         hits[start:stop] = position
+        for path in (origin_path, direction_path, combined_path, position_path):
+            path.unlink()
         print("QUERY_BATCH_DONE", flush=True)
     np.savez(workdir / f"{request}.result.npz", colors=colors, alphas=alphas, hits=hits)
 

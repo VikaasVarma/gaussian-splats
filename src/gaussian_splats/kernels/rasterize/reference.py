@@ -31,7 +31,7 @@ def project_gaussians(
     cy,
     image_width,
     image_height,
-    covariance_epsilon=0.3,
+    covariance_epsilon=0.03,
 ):
     # Project Gaussian means and covariances.
     mean_world = mean
@@ -94,7 +94,7 @@ def project_and_count(
     far,
     rendering_mode,
     confidence,
-    covariance_epsilon=0.3,
+    covariance_epsilon=0.03,
 ):
     assert tile_size > 0 and tile_size & (tile_size - 1) == 0
     assert image_width % tile_size == 0 and image_height % tile_size == 0

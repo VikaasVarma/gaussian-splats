@@ -2,6 +2,7 @@ import math
 
 import torch
 import torch.nn.functional as F
+from tqdm.auto import tqdm
 
 from gaussian_splats.splats.splats import GaussianSplat
 from gaussian_splats.splats.utils import spherical_harmonics
@@ -102,6 +103,7 @@ def sample_outgoing_directions(normals: torch.Tensor, count: int) -> torch.Tenso
     )
 
 
+@torch.no_grad()
 def fit_sh(
     colors: torch.Tensor,  # N x V x 3
     directions: torch.Tensor,  # N x V x 3
@@ -111,22 +113,30 @@ def fit_sh(
     N, V, _ = directions.shape
     C = (degree + 1) ** 2
 
-    # Evaluate SH basis at each query direction
-    basis = spherical_harmonics(directions.reshape(-1, 3), C).reshape(N, V, C)
-
-    # Convert radiance to display color and remove the SH renderer's offset
-    colors = colors.masked_fill(~valid[..., None], 0).clamp_min(0)
-    target = linear_to_srgb(colors).clamp(0, 1) - 0.5
-
-    # Build normal equations using valid queries
-    weights = valid[..., None].to(colors.dtype)
-    weighted_basis = (basis * weights).mT  # N x C x V
-    gram = weighted_basis @ basis  # N x C x C
-    rhs = weighted_basis @ target  # N x C x 3
-
-    # Regualirize higher order coefficients
     bands = torch.arange(C, device=colors.device).float().sqrt().floor()
-    regularization = (1 + bands).square() * 1e-3
-    gram = gram + torch.diag(regularization.to(colors.dtype))
+    regularization = torch.diag((1 + bands).square() * 1e-3)
+    coefficients = torch.empty(N, C, 3, device=colors.device, dtype=torch.float32)
+    for start in tqdm(range(0, N, 2048), desc="Fit SH", unit="batch"):
+        stop = min(start + 2048, N)
+        # Evaluate SH basis at each query direction
+        basis = spherical_harmonics(directions[start:stop].float().reshape(-1, 3), C)
+        basis = basis.reshape(stop - start, V, C)
 
-    return torch.linalg.solve(gram, rhs)
+        # Convert radiance to display color and remove the SH renderer's offset
+        samples = (
+            colors[start:stop].float().masked_fill(~valid[start:stop, :, None], 0).clamp_min(0)
+        )
+        target = linear_to_srgb(samples).clamp(0, 1) - 0.5
+
+        # Build normal equations using valid queries
+        weights = valid[start:stop, :, None].to(samples.dtype)
+        weighted_basis = (basis * weights).mT  # N x C x V
+        gram = weighted_basis @ basis  # N x C x C
+        rhs = weighted_basis @ target  # N x C x 3
+
+        # Regularize higher order coefficients
+        gram = gram + regularization
+
+        coefficients[start:stop] = torch.cholesky_solve(rhs, torch.linalg.cholesky(gram))
+
+    return coefficients

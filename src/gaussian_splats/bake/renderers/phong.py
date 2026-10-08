@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
+from tqdm.auto import tqdm
 
 from gaussian_splats.splats.camera import PinholeCamera
 
@@ -27,6 +28,30 @@ class PhongBackend(RayBackend, RenderBackend):
         self.specular_strength = specular_strength
 
     def query(
+        self,
+        scene: Scene,
+        origins: torch.Tensor,
+        directions: torch.Tensor,
+        triangle_ids: torch.Tensor,
+        barycentric: torch.Tensor,
+        **kwargs: object,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        colors, masks = [], []
+        batch_size = 512
+        for start in tqdm(range(0, len(origins), batch_size), desc="Phong queries", unit="batch"):
+            stop = start + batch_size
+            color, valid = self._query(
+                scene,
+                origins[start:stop],
+                directions[start:stop],
+                triangle_ids[start:stop],
+                barycentric[start:stop],
+            )
+            colors.append(color)
+            masks.append(valid)
+        return torch.cat(colors), torch.cat(masks)
+
+    def _query(
         self,
         scene: Scene,
         origins: torch.Tensor,  # N x 3

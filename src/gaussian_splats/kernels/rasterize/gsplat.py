@@ -83,7 +83,7 @@ def rasterize(
         height=height,
         near_plane=near,
         far_plane=far,
-        eps2d=0.3,
+        eps2d=0.03,
         sh_degree=sh_degree,
         packed=True,
         tile_size=tile_size,

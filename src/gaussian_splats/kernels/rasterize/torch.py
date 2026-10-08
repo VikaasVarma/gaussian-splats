@@ -23,7 +23,7 @@ def project(
     splats: GaussianSplat,
     camera: Camera,
     indices: torch.Tensor | None = None,
-    covariance_epsilon: float = 0.3,
+    covariance_epsilon: float = 0.03,
 ) -> ProjectedGaussianSplat:
     (mean, rotation, scale, opacity, color, normals) = (
         splats.mean,
@@ -235,7 +235,7 @@ def rasterize(
     rendering_mode: Literal["gaussian", "ellipsoid"] = "gaussian",
     confidence: float = 0.95,
     indices: torch.Tensor | None = None,
-    covariance_epsilon: float = 0.3,
+    covariance_epsilon: float = 0.03,
 ) -> torch.Tensor:
     projected = project(splats, camera, indices, covariance_epsilon=covariance_epsilon)
     projected = cull(projected, near, far)

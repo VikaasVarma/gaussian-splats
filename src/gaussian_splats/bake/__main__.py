@@ -16,6 +16,7 @@ bake_app = typer.Typer(add_completion=False, no_args_is_help=True)
 app.add_typer(bake_app, name="bake")
 
 
+@torch.no_grad()
 def _run_bake(
     mesh: Path,
     output: Path | None,
@@ -61,24 +62,28 @@ def bake_cycles(
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     resolution: Annotated[int | None, typer.Option("--resolution", min=2)] = None,
     n_splats: Annotated[int | None, typer.Option("--n-splats", min=1)] = None,
-    sigma: Annotated[float, typer.Option(min=0)] = 0.65,
+    seed: Annotated[int, typer.Option(help="Sampling seed.")] = 0,
+    sigma: Annotated[float, typer.Option(min=0)] = 0.6825,
     device: Annotated[
-        str, typer.Option("--device", help="PyTorch device for surface sampling.")
+        str, typer.Option("--device", help="PyTorch device for sampling and SH fitting.")
     ] = "cpu",
-    cycles_samples: Annotated[int, typer.Option("--samples", min=1)] = 1,
+    cycles_samples: Annotated[int, typer.Option("--samples", min=1)] = 32,
     cycles_device: Annotated[str, typer.Option(help="Cycles backend: CPU or OPTIX.")] = "CPU",
     cycles_workers: Annotated[
         int, typer.Option(min=1, help="Concurrent Blender processes for Cycles queries.")
     ] = 1,
     eps: Annotated[float, typer.Option(min=0)] = 1e-4,
-    ray_batch_size: Annotated[int, typer.Option(min=1, max=8192)] = 8192,
-    sh_degree: Annotated[int, typer.Option(min=0, max=8)] = 4,
-    view_samples: Annotated[int, typer.Option(min=1)] = 32,
+    ray_batch_size: Annotated[int, typer.Option(min=1)] = 1048576,
+    sh_degree: Annotated[int, typer.Option(min=0, max=12)] = 6,
+    view_samples: Annotated[int, typer.Option(min=1)] = 128,
     sh_smoothing_percent: Annotated[
         float, typer.Option(min=0, max=100, help="Blend SH toward each triangle mean, in percent.")
     ] = 0.0,
-    exposure: Annotated[float, typer.Option()] = 4.0,
+    exposure: Annotated[float, typer.Option()] = 0.0,
 ) -> None:
+    torch.manual_seed(seed)
+    if resolution is None and n_splats is None:
+        n_splats = 250000
     with BlenderSession(mesh, blender) as session:
         backend = CyclesBackend(
             session, cycles_samples, ray_batch_size, eps, exposure, cycles_device, cycles_workers
@@ -143,6 +148,7 @@ def bake_phong(
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     resolution: Annotated[int | None, typer.Option("--resolution", min=2)] = None,
     n_splats: Annotated[int | None, typer.Option("--n-splats", min=1)] = None,
+    seed: Annotated[int, typer.Option(help="Sampling seed.")] = 0,
     sigma: Annotated[float, typer.Option(min=0)] = 0.65,
     device: Annotated[
         str, typer.Option("--device", help="PyTorch device for sampling and rendering.")
@@ -150,12 +156,13 @@ def bake_phong(
     ambient_strength: Annotated[float, typer.Option(min=0)] = 0.25,
     diffuse_strength: Annotated[float, typer.Option(min=0)] = 1.0,
     specular_strength: Annotated[float, typer.Option(min=0)] = 1.0,
-    sh_degree: Annotated[int, typer.Option(min=0, max=3)] = 2,
+    sh_degree: Annotated[int, typer.Option(min=0, max=12)] = 2,
     view_samples: Annotated[int, typer.Option(min=1)] = 32,
     sh_smoothing_percent: Annotated[
         float, typer.Option(min=0, max=100, help="Blend SH toward each triangle mean, in percent.")
     ] = 0.0,
 ) -> None:
+    torch.manual_seed(seed)
     with BlenderSession(mesh, blender) as session:
         scene = session.scene
 
