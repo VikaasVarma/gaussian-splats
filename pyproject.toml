@@ -42,7 +42,6 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gaussian_splats"]
-artifacts = ["src/gaussian_splats/kernels/rasterize/cuda_sort.cu"]
 
 [tool.ruff]
 line-length = 100
@@ -51,7 +50,6 @@ target-version = "py312"
 [tool.pytest.ini_options]
 testpaths = [
     "src/gaussian_splats/kernels/rasterize/tests",
-    "src/gaussian_splats/kernels/rasterize/cute/tests",
 ]
 
 [tool.ruff.lint]

@@ -97,14 +97,16 @@ async def upload(request, page, load, header, suffixes):
     return Response(status_code=204)
 
 
-def create_app(registrations=None):
+def create_app(registrations=None, checkpoint: Path | None = None):
     if registrations is None:
         from .bake.backend import page as bake_page
         from .gaussian.backend import page as gaussian_page
         from .scene.backend import page as scene_page
+        from .viewer.backend import page as viewer_page
 
         registrations = [
             (("/gaussian",), gaussian_page()),
+            (("/viewer",), viewer_page()),
             (("/bake",), bake_page()),
             (("/scene", "/blender"), scene_page()),
         ]
@@ -116,6 +118,9 @@ def create_app(registrations=None):
             try:
                 for _, page in registrations:
                     await page.start(worker)
+                    load_checkpoint = getattr(page.backend, "load_checkpoint", None)
+                    if checkpoint is not None and load_checkpoint is not None:
+                        await page.run(load_checkpoint, checkpoint, checkpoint.name)
                     close = getattr(page.backend, "close", None)
                     if close is not None:
                         cleanup.callback(close)
@@ -140,11 +145,14 @@ def create_app(registrations=None):
     return Starlette(debug=True, routes=routes, lifespan=lifespan)
 
 
-def serve(host: str = "127.0.0.1", port: int = 7007):
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 7007,
+    checkpoint: Path | None = typer.Option(None, exists=True, dir_okay=False),
+):
     typer.echo(f"Viewer: http://{host}:{port}")
     uvicorn.run(
-        "gaussian_splats.visualize.server:create_app",
-        factory=True,
+        create_app(checkpoint=checkpoint),
         host=host,
         port=port,
         log_level="info",

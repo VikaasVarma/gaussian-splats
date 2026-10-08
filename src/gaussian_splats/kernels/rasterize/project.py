@@ -207,9 +207,9 @@ def _project_and_count_kernel(
         jc10 * axis2_x + jc11 * axis2_y + jc12 * axis2_z,
     )
     cov00, cov01, cov11 = (
-        f00 * f00 + f01 * f01 + f02 * f02 + 0.3,
+        f00 * f00 + f01 * f01 + f02 * f02 + 0.03,
         f00 * f10 + f01 * f11 + f02 * f12,
-        f10 * f10 + f11 * f11 + f12 * f12 + 0.3,
+        f10 * f10 + f11 * f11 + f12 * f12 + 0.03,
     )
     determinant = cov00 * cov11 - cov01 * cov01
     tl.store(inverse_covariance + index * 4, cov11 / determinant)
