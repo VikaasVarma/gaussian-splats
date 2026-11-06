@@ -19,7 +19,7 @@ def rasterize(
     rendering_mode: Literal["gaussian", "ellipsoid"] = "gaussian",
     confidence: float = 0.95,
     indices: torch.Tensor | None = None,
-    backend: Literal["torch", "triton", "gsplat"] = "torch",
+    backend: Literal["torch", "triton", "gsplat"] = "gsplat",
 ) -> torch.Tensor:
     match backend:
         case "torch":

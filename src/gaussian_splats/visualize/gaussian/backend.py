@@ -27,7 +27,7 @@ def render_gaussians(splats, camera, settings, width, height, rasterizer=rasteri
     camera = replace(camera, image_size=image_size, principal_point=(width / 2, height / 2))
     count = min(max(1, int(settings.get("num_splats") or 10_000)), splats.num_points)
     options = {
-        "backend": settings.get("backend", "torch"),
+        "backend": settings.get("backend", "gsplat"),
         "tile_size": tile,
         "opacity_threshold": float(settings.get("opacity_threshold", 0.999)),
         "near": float(settings.get("near", 0.1)),
@@ -68,9 +68,7 @@ class GaussianViewer:
     def load_checkpoint(self, path, filename):
         device = self.splats.mean.device if self.splats is not None else default_device()
         splats = GaussianSplat.from_checkpoint(path).to(device).eval()
-        rotation = splats.mean.new_tensor(
-            [math.cos(math.pi / 8), -math.sin(math.pi / 8), 0.0, 0.0]
-        )
+        rotation = splats.mean.new_tensor([math.cos(math.pi / 8), -math.sin(math.pi / 8), 0.0, 0.0])
         camera = PinholeCamera(rotation=rotation).fit_to_points(splats.mean)
         self.controller = CameraController(camera)
         self.splats = splats

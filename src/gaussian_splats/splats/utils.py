@@ -35,7 +35,7 @@ def spherical_harmonics(
 ) -> torch.Tensor:  # N x (degree + 1)^2
     """Normalized real SH, ordered by band l and order m = -l, ..., l."""
     degree = math.isqrt(num_coefficients) - 1
-    if (degree + 1) ** 2 != num_coefficients or not 0 <= degree <= 12:
+    if (degree + 1) ** 2 != num_coefficients or not 0 <= degree <= 28:
         raise ValueError(f"Unsupported spherical-harmonic coefficient count: {num_coefficients}")
 
     x, y, z = directions.unbind(dim=-1)
