@@ -1,6 +1,7 @@
 import math
 from collections.abc import Sequence
 from functools import lru_cache
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -13,6 +14,17 @@ from torchmetrics.functional.image import (
 from ..splats.camera import Camera
 from ..splats.splats import GaussianSplat
 from ..splats.utils import quaternion_to_rotation_matrix, rgb_to_sh
+
+
+def resolve_checkpoint_dir(
+    root: Path, project: str, experiment: str, step: int, n_steps: int, loss: float
+) -> Path:
+    project = project.replace(".", "_").replace("/", "_")
+    experiment = experiment.replace(".", "_").replace("/", "_")
+    loss = f"{loss:.4f}".replace(".", "_")
+    path = root / project / experiment / f"step_{step:0{len(str(n_steps))}d}_loss_{loss}.pt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def initialize_splats(
@@ -106,8 +118,11 @@ def append_empty_splats(splats: GaussianSplat, count: int) -> GaussianSplat:
 
 @torch.no_grad()
 def copy_splats(splats: GaussianSplat, counts: Tensor, output_indices: Tensor) -> Tensor:
-    parents = counts.nonzero().squeeze(-1)
-    copies = counts[counts > 0]
+    """Inplace copy splats from parents to output indices."""
+    counts_cpu = counts.cpu()
+    parents_cpu = counts_cpu.nonzero().squeeze(-1)
+    parents = parents_cpu.to(counts.device)
+    copies = counts_cpu[parents_cpu].to(counts.device)
 
     source_indices = parents.repeat_interleave(copies)
     opacity = splats.opacity.sigmoid().squeeze(-1)[parents]
@@ -131,7 +146,9 @@ def copy_splats(splats: GaussianSplat, counts: Tensor, output_indices: Tensor) -
 
 @torch.no_grad()
 def relocate_splats(
-    splats: GaussianSplat, optimizer: torch.optim.Optimizer, max_splats: int
+    splats: GaussianSplat,
+    optimizer: torch.optim.Optimizer | None = None,
+    densification_factor: float = 1.0,
 ) -> None:
     reset_indices = []
 
@@ -149,7 +166,7 @@ def relocate_splats(
         )
 
     # Densify if needed
-    target_splats = min(max_splats, int(1.05 * len(splats.mean)))
+    target_splats = int(densification_factor * len(splats.mean))
     diff = max(0, target_splats - len(splats.mean))
     if diff:
         opacity = splats.opacity.sigmoid().squeeze(-1)
@@ -161,23 +178,33 @@ def relocate_splats(
         )
         reset_indices.append(copied_indices[copied_indices < len(splats.mean)])
 
-    # Reset Adam state
-    if reset_indices:
-        indices = torch.cat(reset_indices).unique()
-        for state in optimizer.state.values():
-            for key in ("exp_avg", "exp_avg_sq"):
-                if key in state:
-                    state[key][indices] = 0
-
-    if diff:
-        groups = {group["name"]: group for group in optimizer.param_groups}
-        for name in ("mean", "rotation", "scale", "opacity", "color", "normals"):
-            old, new = getattr(splats, name), getattr(extended, name)
-            group = groups.get(name)
-            state = optimizer.state.pop(old, None) if group else None
-            if state is not None:
+    # Update optimizer state
+    if optimizer is None:
+        if diff:
+            for name in ("mean", "rotation", "scale", "opacity", "color", "normals"):
+                setattr(splats, name, getattr(extended, name))
+    elif isinstance(optimizer, (torch.optim.Adam, torch.optim.AdamW)):
+        if reset_indices:
+            indices = torch.cat(reset_indices).unique()
+            for state in optimizer.state.values():
                 for key in ("exp_avg", "exp_avg_sq"):
-                    state[key] = torch.cat((state[key], torch.zeros_like(new[-diff:])))
-                optimizer.state[new] = state
-                group["params"][0] = new
-            setattr(splats, name, new)
+                    if key in state:
+                        state[key][indices] = 0
+
+        if diff:
+            for name in ("mean", "rotation", "scale", "opacity", "color", "normals"):
+                old, new = getattr(splats, name), getattr(extended, name)
+                state = optimizer.state.pop(old, None)
+                if state is not None:
+                    for key in ("exp_avg", "exp_avg_sq"):
+                        if key in state:
+                            state[key] = torch.cat((state[key], torch.zeros_like(new[-diff:])))
+                    optimizer.state[new] = state
+                for group in optimizer.param_groups:
+                    for index, parameter in enumerate(group["params"]):
+                        if parameter is old:
+                            group["params"][index] = new
+                            break
+                setattr(splats, name, new)
+    else:
+        raise TypeError("optimizer must be Adam, AdamW, or None")

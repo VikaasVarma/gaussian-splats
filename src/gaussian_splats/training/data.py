@@ -11,7 +11,11 @@ from ..splats.camera import Camera, PinholeCamera
 
 class ViewDataset(Dataset[tuple[Camera, Tensor]]):
     def __init__(self, views: list[tuple[Camera, Tensor]]):
-        self.views = [(deepcopy(camera), image.detach().cpu().float()) for camera, image in views]
+        self.views = []
+        for camera, image in views:
+            image = image.detach().cpu()
+            image = image.float().div_(255) if image.dtype == torch.uint8 else image.float()
+            self.views.append((deepcopy(camera), image))
 
     def __len__(self) -> int:
         return len(self.views)

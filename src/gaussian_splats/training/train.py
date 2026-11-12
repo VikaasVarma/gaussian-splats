@@ -20,7 +20,7 @@ import wandb
 from ..splats.rasterize import rasterize
 from ..splats.splats import GaussianSplat
 from .data import make_dataloaders
-from .utils import initialize_splats, noise_splats, relocate_splats, ssim
+from .utils import initialize_splats, noise_splats, relocate_splats, resolve_checkpoint_dir, ssim
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,7 +29,9 @@ TILE_SIZE = 16
 
 
 @torch.no_grad()
-def validate(splats: GaussianSplat, loader: DataLoader) -> tuple[dict[str, float], list[Tensor]]:
+def validate(
+    splats: GaussianSplat, loader: DataLoader, n_views: int = 0
+) -> tuple[dict[str, float], list[Tensor]]:
     metrics = MetricCollection(
         {
             "l1": MeanAbsoluteError(),
@@ -37,8 +39,10 @@ def validate(splats: GaussianSplat, loader: DataLoader) -> tuple[dict[str, float
             "ssim": StructuralSimilarityIndexMeasure(data_range=1.0),
         }
     ).to(DEVICE)
-    comparisons = []
-    for camera, target in tqdm(loader, desc="Validate", unit="view", leave=False):
+    views = []
+    for index, (camera, target) in enumerate(
+        tqdm(loader, desc="Validate", unit="view", leave=False)
+    ):
         camera = camera.to(DEVICE)
         target = target.to(DEVICE)
 
@@ -47,11 +51,12 @@ def validate(splats: GaussianSplat, loader: DataLoader) -> tuple[dict[str, float
             image.permute(2, 0, 1).contiguous()[None],
             target.permute(2, 0, 1).contiguous()[None],
         )
-        rendered = (image * 255).round().byte().cpu()
-        reference = (target.clamp(0, 1) * 255).round().byte().cpu()
-        comparisons.append(torch.cat((rendered, reference), dim=1))
+        if index < n_views:
+            rendered = (image * 255).round().byte().cpu()
+            reference = (target.clamp(0, 1) * 255).round().byte().cpu()
+            views.append(torch.cat((rendered, reference), dim=1))
 
-    return {name: value.item() for name, value in metrics.compute().items()}, comparisons
+    return {name: value.item() for name, value in metrics.compute().items()}, views
 
 
 def train(
@@ -77,16 +82,20 @@ def train(
     scale_lr: float = 5e-3,
     rotation_lr: float = 1e-3,
     noise_lr: float = 5e5,
-    log: bool = False,
-    log_project: str = "gaussian-splat",
-    log_group: str | None = None,
     # Regularization
     opacity_reg: float = 1e-2,
     scale_reg: float = 1e-2,
+    # Logging and checkpointing
+    log: bool = False,
+    project: str = "gaussian-splat",
+    group: str | None = None,
+    checkpoint_dir: Path = Path("output"),
+    checkpoint_every_n_validations: int = 5,
+    n_views: int = 4,
 ) -> GaussianSplat:
     """Randomly initialize and train on the expected torch-saved view dataset."""
     if log:
-        run = wandb.init(project=log_project, group=log_group, save_code=True)
+        run = wandb.init(project=project, group=group, save_code=True)
         run.log_code(include_fn=lambda path: Path(path).suffix == ".py")
 
     torch.manual_seed(seed)
@@ -108,6 +117,7 @@ def train(
     ]
     optimizer = torch.optim.Adam(groups, eps=1e-15)
     step = 0
+    validations = 0
 
     epochs = math.ceil(n_steps / len(train_loader))
     with tqdm(total=n_steps, desc="Train", unit="step") as progress:
@@ -144,7 +154,8 @@ def train(
                 # Noise positions
                 noise_splats(splats, noise_lr, position_lr)
                 if step >= warmup and step % relocation_interval == 0:
-                    relocate_splats(splats, optimizer, max_splats)
+                    densification_factor = min(1.05, max_splats / splats.num_points)
+                    relocate_splats(splats, optimizer, densification_factor)
 
                 step += 1
                 progress.update()
@@ -154,6 +165,7 @@ def train(
                     splats=f"{splats.num_points:,}",
                 )
 
+                # Log
                 if log:
                     logs = {
                         f"train/{key}": value
@@ -170,16 +182,29 @@ def train(
 
                 # Validate
                 if step % val_every_n_steps == 0 or step == n_steps:
-                    validation_metrics, comparisons = validate(splats, validation_loader)
+                    validations += 1
+                    checkpoint = (
+                        validations % checkpoint_every_n_validations == 0 or step == n_steps
+                    )
+                    validation_metrics, views = validate(
+                        splats,
+                        validation_loader,
+                        n_views=n_views if log and checkpoint else 0,
+                    )
 
                     if log:
-                        val_logs = {
-                            **{f"val/{key}": value for key, value in validation_metrics.items()},
-                            "val/comparisons": [
-                                wandb.Image(image.permute(2, 0, 1)) for image in comparisons
-                            ],
-                        }
-                        logs.update(val_logs)
+                        logs.update(
+                            {f"val/{key}": value for key, value in validation_metrics.items()}
+                        )
+                        if views:
+                            logs["val/views"] = [
+                                wandb.Image(image.permute(2, 0, 1)) for image in views
+                            ]
+                        if checkpoint:
+                            path = resolve_checkpoint_dir(
+                                checkpoint_dir, project, run.name, step, n_steps, loss.item()
+                            )
+                            splats.save_checkpoint(path)
 
                 if log:
                     run.log({**logs, "step": step})
@@ -225,12 +250,16 @@ def cli(
     scale_lr: Annotated[float, typer.Option(min=0)] = 5e-3,
     rotation_lr: Annotated[float, typer.Option(min=0)] = 1e-3,
     noise_lr: Annotated[float, typer.Option(min=0)] = 5e5,
-    log: Annotated[bool, typer.Option("--log")] = False,
-    log_project: Annotated[str, typer.Option("--log-project")] = "gaussian-splat",
-    log_group: Annotated[str | None, typer.Option("--log-group")] = None,
     #
     opacity_reg: Annotated[float, typer.Option(min=0)] = 1e-2,
     scale_reg: Annotated[float, typer.Option(min=0)] = 1e-2,
+    #
+    log: Annotated[bool, typer.Option("--log")] = False,
+    log_project: Annotated[str, typer.Option("--log-project")] = "gaussian-splat",
+    log_group: Annotated[str | None, typer.Option("--log-group")] = None,
+    checkpoint_dir: Annotated[Path, typer.Option()] = Path("output"),
+    checkpoint_every_n_validations: Annotated[int, typer.Option(min=1)] = 5,
+    n_views: Annotated[int, typer.Option(min=0)] = 4,
 ) -> None:
     """Train from random initialization and save beside the input file."""
     result = train(
@@ -256,12 +285,16 @@ def cli(
         scale_lr=scale_lr,
         rotation_lr=rotation_lr,
         noise_lr=noise_lr,
-        log=log,
-        log_project=log_project,
-        log_group=log_group,
         # Regularization
         opacity_reg=opacity_reg,
         scale_reg=scale_reg,
+        # Logging and checkpointing
+        log=log,
+        project=log_project,
+        group=log_group,
+        checkpoint_dir=checkpoint_dir,
+        checkpoint_every_n_validations=checkpoint_every_n_validations,
+        n_views=n_views,
     )
     output = data_path.with_name(f"{data_path.stem}.pt")
     result.save_checkpoint(output)
