@@ -109,6 +109,7 @@ def fit_sh(
     directions: torch.Tensor,  # N x V x 3
     valid: torch.Tensor,  # N x V
     degree: int,
+    batch_size: int = 1024,
 ) -> torch.Tensor:  # N x (degree + 1)^2 x 3
     N, V, _ = directions.shape
     C = (degree + 1) ** 2
@@ -116,10 +117,10 @@ def fit_sh(
     bands = torch.arange(C, device=colors.device).float().sqrt().floor()
     regularization = torch.diag((1 + bands).square() * 1e-3)
     coefficients = torch.empty(N, C, 3, device=colors.device, dtype=torch.float32)
-    for start in tqdm(range(0, N, 2048), desc="Fit SH", unit="batch"):
-        stop = min(start + 2048, N)
+    for start in tqdm(range(0, N, batch_size), desc="Fit SH", unit="batch"):
+        stop = min(start + batch_size, N)
         # Evaluate SH basis at each query direction
-        basis = spherical_harmonics(directions[start:stop].float().reshape(-1, 3), C)
+        basis = spherical_harmonics(directions[start:stop].float().reshape(-1, 3), C).double()
         basis = basis.reshape(stop - start, V, C)
 
         # Convert radiance to display color and remove the SH renderer's offset
@@ -137,6 +138,6 @@ def fit_sh(
         # Regularize higher order coefficients
         gram = gram + regularization
 
-        coefficients[start:stop] = torch.cholesky_solve(rhs, torch.linalg.cholesky(gram))
+        coefficients[start:stop] = torch.cholesky_solve(rhs, torch.linalg.cholesky(gram)).float()
 
     return coefficients

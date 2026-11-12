@@ -75,8 +75,14 @@ class CyclesBackend(RayBackend, RenderBackend):
                     },
                     progress=progress,
                 )
-                with np.load(output) as result:
-                    return tuple(result[key] for key in ("colors", "alphas", "hits"))
+                try:
+                    with np.load(output) as result:
+                        return tuple(result[key] for key in ("colors", "alphas", "hits"))
+                finally:
+                    output.unlink(missing_ok=True)
+                    output.with_name(output.name.replace(".result.npz", ".input.npz")).unlink(
+                        missing_ok=True
+                    )
 
         with (
             tqdm(total=batches, desc="Cycles queries", unit="batch") as progress,
@@ -88,8 +94,6 @@ class CyclesBackend(RayBackend, RenderBackend):
             lambda chunks: torch.as_tensor(np.concatenate(chunks), device=device, dtype=dtype),
             zip(*results, strict=True),
         )
-        colors = colors * 2**self.exposure
-
         valid = torch.isfinite(hits).all(1) & (
             torch.linalg.vector_norm(hits - origins, dim=1) <= self.eps * 2
         )
